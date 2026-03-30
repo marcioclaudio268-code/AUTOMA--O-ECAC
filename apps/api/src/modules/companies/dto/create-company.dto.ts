@@ -73,9 +73,27 @@ export class CreateCompanyDto {
   )
   @IsOptional()
   @IsDateString({}, {
+    message: 'ultimaConferenciaAcessoEm invalida.'
+  })
+  ultimaConferenciaAcessoEm?: string | null;
+
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || null : value
+  )
+  @IsOptional()
+  @IsDateString({}, {
     message: 'ultimaConferenciaOperacionalEm invalida.'
   })
   ultimaConferenciaOperacionalEm?: string | null;
+
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || null : value
+  )
+  @IsOptional()
+  @IsDateString({}, {
+    message: 'ultimaConferenciaProcuracaoEm invalida.'
+  })
+  ultimaConferenciaProcuracaoEm?: string | null;
 
   @Transform(({ value }) =>
     typeof value === 'string' ? value.trim() || null : value

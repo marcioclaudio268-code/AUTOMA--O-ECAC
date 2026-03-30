@@ -424,7 +424,7 @@ export default function CarteiraPage() {
                   Empresas na carteira
                 </h2>
                 <p className="text-sm text-slate-600">
-                Filtre por responsavel, status manual, conferencia e pendencia.
+                  Filtre por responsavel, status manual, conferencias e pendencia.
                 </p>
               </div>
             <p className="text-sm text-slate-500">
@@ -586,7 +586,7 @@ export default function CarteiraPage() {
                     <th className="px-3 py-3 font-medium">Responsavel</th>
                     <th className="px-3 py-3 font-medium">Acesso</th>
                     <th className="px-3 py-3 font-medium">Procuracao</th>
-                    <th className="px-3 py-3 font-medium">Conferencia</th>
+                    <th className="px-3 py-3 font-medium">Conferencias</th>
                     <th className="px-3 py-3 font-medium">Pendencia</th>
                     <th className="px-3 py-3 font-medium">Regularizacao</th>
                     <th className="px-3 py-3 font-medium">Observacoes</th>
@@ -619,7 +619,34 @@ export default function CarteiraPage() {
                         {STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
                       </td>
                       <td className="px-3 py-4 text-slate-700">
-                        {formatDateTime(company.ultimaConferenciaOperacionalEm)}
+                        <div className="space-y-2">
+                          <div>
+                            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                              Acesso
+                            </p>
+                            <p>{formatDateTime(company.ultimaConferenciaAcessoEm)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                              Procuracao
+                            </p>
+                            <p>
+                              {formatDateTime(
+                                company.ultimaConferenciaProcuracaoEm
+                              )}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                              Operacional
+                            </p>
+                            <p>
+                              {formatDateTime(
+                                company.ultimaConferenciaOperacionalEm
+                              )}
+                            </p>
+                          </div>
+                        </div>
                       </td>
                       <td className="px-3 py-4 text-slate-700">
                         {company.pendenciaOperacional ? 'Pendente' : 'Regular'}

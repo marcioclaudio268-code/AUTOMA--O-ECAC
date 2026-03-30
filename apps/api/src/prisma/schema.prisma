@@ -87,7 +87,9 @@ model Empresa {
   statusAcesso            StatusAcessoEmpresa   @default(NAO_VERIFICADO)
   statusProcuracao        StatusProcuracaoEmpresa @default(NAO_VERIFICADA)
   observacoesOperacionais String?               @db.Text
+  ultimaConferenciaAcessoEm DateTime?
   ultimaConferenciaOperacionalEm DateTime?
+  ultimaConferenciaProcuracaoEm DateTime?
   regularizadaEm          DateTime?
   ultimaVarreduraEm       DateTime?
   ultimoEventoRelevanteEm DateTime?

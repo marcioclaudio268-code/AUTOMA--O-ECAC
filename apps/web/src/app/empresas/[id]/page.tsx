@@ -39,7 +39,9 @@ type CompanyFormState = {
   pendenciaOperacional: boolean;
   nomeFantasia: string;
   observacoesOperacionais: string;
+  ultimaConferenciaAcessoEm: string;
   ultimaConferenciaOperacionalEm: string;
+  ultimaConferenciaProcuracaoEm: string;
   razaoSocial: string;
   regimeTributario: RegimeTributario;
   responsavelInternoId: string;
@@ -60,7 +62,9 @@ const initialFormState: CompanyFormState = {
   pendenciaOperacional: false,
   nomeFantasia: '',
   observacoesOperacionais: '',
+  ultimaConferenciaAcessoEm: '',
   ultimaConferenciaOperacionalEm: '',
+  ultimaConferenciaProcuracaoEm: '',
   razaoSocial: '',
   regimeTributario: 'SIMPLES_NACIONAL',
   responsavelInternoId: '',
@@ -75,8 +79,14 @@ function buildPayload(form: CompanyFormState): CompanyCreateInput {
     pendenciaOperacional: form.pendenciaOperacional,
     nomeFantasia: form.nomeFantasia.trim() || undefined,
     observacoesOperacionais: form.observacoesOperacionais.trim() || undefined,
+    ultimaConferenciaAcessoEm: form.ultimaConferenciaAcessoEm.trim()
+      ? new Date(form.ultimaConferenciaAcessoEm).toISOString()
+      : null,
     ultimaConferenciaOperacionalEm: form.ultimaConferenciaOperacionalEm.trim()
       ? new Date(form.ultimaConferenciaOperacionalEm).toISOString()
+      : null,
+    ultimaConferenciaProcuracaoEm: form.ultimaConferenciaProcuracaoEm.trim()
+      ? new Date(form.ultimaConferenciaProcuracaoEm).toISOString()
       : null,
     razaoSocial: form.razaoSocial.trim(),
     regimeTributario: form.regimeTributario,
@@ -93,8 +103,14 @@ function toFormState(company: CompanyDetailItem): CompanyFormState {
     pendenciaOperacional: company.pendenciaOperacional,
     nomeFantasia: company.nomeFantasia ?? '',
     observacoesOperacionais: company.observacoesOperacionais ?? '',
+    ultimaConferenciaAcessoEm: toDateTimeLocalValue(
+      company.ultimaConferenciaAcessoEm
+    ),
     ultimaConferenciaOperacionalEm: toDateTimeLocalValue(
       company.ultimaConferenciaOperacionalEm
+    ),
+    ultimaConferenciaProcuracaoEm: toDateTimeLocalValue(
+      company.ultimaConferenciaProcuracaoEm
     ),
     razaoSocial: company.razaoSocial,
     regimeTributario: company.regimeTributario,
@@ -474,7 +490,7 @@ export default function CompanyDetailPage() {
                   </p>
                 </div>
 
-                <dl className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <dl className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                     <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
                       Status de acesso
@@ -501,7 +517,27 @@ export default function CompanyDetailPage() {
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                     <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Ultima conferencia
+                      Ultima conferencia de acesso
+                    </dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">
+                      {formatOperationalDate(
+                        company.ultimaConferenciaAcessoEm
+                      )}
+                    </dd>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Ultima conferencia de procuracao
+                    </dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">
+                      {formatOperationalDate(
+                        company.ultimaConferenciaProcuracaoEm
+                      )}
+                    </dd>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Ultima conferencia operacional
                     </dt>
                     <dd className="mt-1 text-sm font-medium text-slate-900">
                       {formatOperationalDate(
@@ -660,6 +696,22 @@ export default function CompanyDetailPage() {
                   </dt>
                   <dd className="text-sm font-medium text-slate-900">
                     {STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Ultima conferencia de acesso
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.ultimaConferenciaAcessoEm)}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Ultima conferencia de procuracao
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.ultimaConferenciaProcuracaoEm)}
                   </dd>
                 </div>
                 <div className="space-y-1">
@@ -946,26 +998,61 @@ export default function CompanyDetailPage() {
                     </span>
                   </label>
 
-                  <label className="space-y-2 md:col-span-2">
-                    <span className="block text-sm font-medium text-slate-700">
-                      Ultima conferencia operacional
-                    </span>
-                    <input
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
-                      name="ultimaConferenciaOperacionalEm"
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          ultimaConferenciaOperacionalEm: event.target.value
-                        }))
-                      }
-                      type="datetime-local"
-                      value={form.ultimaConferenciaOperacionalEm}
-                    />
-                    <p className="text-xs text-slate-500">
-                      Data e hora da ultima conferencia manual.
-                    </p>
-                  </label>
+                  <div className="grid gap-4 md:col-span-2 md:grid-cols-3">
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Ultima conferencia de acesso
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="ultimaConferenciaAcessoEm"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            ultimaConferenciaAcessoEm: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.ultimaConferenciaAcessoEm}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Ultima conferencia de procuracao
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="ultimaConferenciaProcuracaoEm"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            ultimaConferenciaProcuracaoEm: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.ultimaConferenciaProcuracaoEm}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Ultima conferencia operacional
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="ultimaConferenciaOperacionalEm"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            ultimaConferenciaOperacionalEm: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.ultimaConferenciaOperacionalEm}
+                      />
+                    </label>
+                  </div>
                 </div>
 
                 <label className="space-y-2">
