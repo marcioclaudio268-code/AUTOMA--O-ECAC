@@ -2,7 +2,9 @@ import type {
   RegimeTributario,
   PendenciaTipo,
   StatusAcessoEmpresa,
-  StatusProcuracaoEmpresa
+  StatusIntegracao,
+  StatusProcuracaoEmpresa,
+  TipoIntegracao
 } from '@/lib/api';
 
 type Option<T extends string> = {
@@ -31,6 +33,20 @@ export const STATUS_PROCURACAO_OPTIONS: Option<StatusProcuracaoEmpresa>[] = [
   { label: 'Nao verificada', value: 'NAO_VERIFICADA' }
 ];
 
+export const STATUS_INTEGRACAO_OPTIONS: Option<StatusIntegracao>[] = [
+  { label: 'Ativa', value: 'ATIVA' },
+  { label: 'Inativa', value: 'INATIVA' },
+  { label: 'Erro', value: 'ERRO' },
+  { label: 'Nao configurada', value: 'NAO_CONFIGURADA' }
+];
+
+export const TIPO_INTEGRACAO_LABELS: Record<TipoIntegracao, string> = {
+  API: 'API',
+  INTEGRA_CONTADOR: 'Contador',
+  MANUAL: 'Manual',
+  RPA: 'RPA'
+};
+
 export const PENDENCIA_TIPO_OPTIONS: Option<PendenciaTipo>[] = [
   { label: 'Acesso', value: 'ACESSO' },
   { label: 'Operacional', value: 'OPERACIONAL' },
@@ -52,6 +68,13 @@ export const STATUS_PROCURACAO_LABELS: Record<
   NAO_VERIFICADA: 'Nao verificada',
   PENDENTE: 'Pendente',
   VALIDA: 'Valida'
+};
+
+export const STATUS_INTEGRACAO_LABELS: Record<StatusIntegracao, string> = {
+  ATIVA: 'Ativa',
+  ERRO: 'Erro',
+  INATIVA: 'Inativa',
+  NAO_CONFIGURADA: 'Nao configurada'
 };
 
 export const PENDENCIA_TIPO_LABELS: Record<PendenciaTipo, string> = {

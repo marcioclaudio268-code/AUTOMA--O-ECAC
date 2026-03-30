@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
 import { requireSession, signOut } from '@/lib/auth';
+import { CompanyIntegrationPanel } from '@/features/companies';
 import {
   getCompany,
   listResponsaveis,
@@ -569,6 +570,8 @@ export default function CompanyDetailPage() {
           </section>
         ) : null}
 
+        {company ? <CompanyIntegrationPanel companyId={company.id} /> : null}
+
         {company ? (
           <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
             <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -689,26 +692,6 @@ export default function CompanyDetailPage() {
                 <p className="whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                   {company.observacoesOperacionais?.trim() || '-'}
                 </p>
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  Integracoes
-                </h3>
-                {company.integracoes.length === 0 ? (
-                  <p className="text-sm text-slate-600">Sem integracoes registradas.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {company.integracoes.map((integration) => (
-                      <li
-                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700"
-                        key={integration.id}
-                      >
-                        {integration.tipoIntegracao} - {integration.statusIntegracao}
-                      </li>
-                    ))}
-                  </ul>
-                )}
               </div>
             </section>
 

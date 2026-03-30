@@ -18,7 +18,7 @@ export type StatusProcuracaoEmpresa =
   | 'PENDENTE'
   | 'NAO_VERIFICADA';
 
-export type TipoIntegracao = 'MANUAL' | 'API' | 'RPA';
+export type TipoIntegracao = 'MANUAL' | 'API' | 'RPA' | 'INTEGRA_CONTADOR';
 
 export type StatusIntegracao =
   | 'ATIVA'
@@ -94,6 +94,14 @@ export type CompanyIntegration = {
   updatedAt: string;
   ultimoErroEm: string | null;
   ultimoSucessoEm: string | null;
+};
+
+export type CompanyIntegrationUpsertInput = {
+  mensagemErroAtual?: string | null | undefined;
+  observacoes?: string | null | undefined;
+  statusIntegracao?: StatusIntegracao | undefined;
+  ultimoErroEm?: string | null | undefined;
+  ultimoSucessoEm?: string | null | undefined;
 };
 
 export type CompanyDetailItem = CompanyBase & {
@@ -356,6 +364,35 @@ export async function listCarteira(
 
 export async function getCompany(id: string): Promise<CompanyDetailItem> {
   return apiRequest<CompanyDetailItem>(`/companies/${id}`);
+}
+
+export async function listCompanyIntegrations(
+  companyId: string
+): Promise<CompanyIntegration[]> {
+  return apiRequest<CompanyIntegration[]>(`/companies/${companyId}/integrations`);
+}
+
+export async function getCompanyIntegration(
+  companyId: string,
+  tipoIntegracao: TipoIntegracao
+): Promise<CompanyIntegration> {
+  return apiRequest<CompanyIntegration>(
+    `/companies/${companyId}/integrations/${encodeURIComponent(tipoIntegracao)}`
+  );
+}
+
+export async function upsertCompanyIntegration(
+  companyId: string,
+  tipoIntegracao: TipoIntegracao,
+  payload: CompanyIntegrationUpsertInput
+): Promise<CompanyIntegration> {
+  return apiRequest<CompanyIntegration>(
+    `/companies/${companyId}/integrations/${encodeURIComponent(tipoIntegracao)}`,
+    {
+      body: payload,
+      method: 'PATCH'
+    }
+  );
 }
 
 export async function createCompany(
