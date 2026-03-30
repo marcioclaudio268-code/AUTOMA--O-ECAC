@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   CompanyIntegrationExecutionAttempt,
   CompanyIntegrationExecutionContext,
-  INTEGRA_CONTADOR_CONTRACT_LOADED_MESSAGE
+  INTEGRA_CONTADOR_CONTRACT_READY_MESSAGE
 } from '../company-integration.shared';
 import {
   loadIntegraContadorContract,
@@ -22,7 +22,7 @@ export class IntegraContadorAdapter {
 
     const contractState = loadIntegraContadorContract(this.configService);
 
-    if (contractState.status === 'missing') {
+    if (contractState.state !== 'ready') {
       return {
         message:
           contractState.message ||
@@ -31,15 +31,8 @@ export class IntegraContadorAdapter {
       };
     }
 
-    if (contractState.status === 'invalid') {
-      return {
-        message: contractState.message,
-        success: false
-      };
-    }
-
     return {
-      message: INTEGRA_CONTADOR_CONTRACT_LOADED_MESSAGE,
+      message: INTEGRA_CONTADOR_CONTRACT_READY_MESSAGE,
       success: false
     };
   }
