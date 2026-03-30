@@ -3,31 +3,14 @@ import {
   Injectable,
   NotFoundException
 } from '@nestjs/common';
-import {
-  Prisma,
-  StatusIntegracao,
-  TipoIntegracao
-} from '@prisma/client';
+import { Prisma, StatusIntegracao, TipoIntegracao } from '@prisma/client';
 
 import { PrismaService } from '../../../prisma/prisma.service';
 import { SaveCompanyIntegrationDto } from '../dto/save-company-integration.dto';
-
-const companyIntegrationSelect = {
-  createdAt: true,
-  empresaId: true,
-  id: true,
-  mensagemErroAtual: true,
-  observacoes: true,
-  statusIntegracao: true,
-  tipoIntegracao: true,
-  updatedAt: true,
-  ultimoErroEm: true,
-  ultimoSucessoEm: true
-} as const;
-
-type CompanyIntegrationRecord = Prisma.IntegracaoEmpresaGetPayload<{
-  select: typeof companyIntegrationSelect;
-}>;
+import {
+  CompanyIntegrationRecord,
+  companyIntegrationSelect
+} from '../company-integration.shared';
 
 type CompanyIntegrationUniqueWhere = {
   empresaId_tipoIntegracao: {

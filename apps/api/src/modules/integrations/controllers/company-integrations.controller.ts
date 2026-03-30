@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseEnumPipe,
+  Post,
   Patch,
   UseGuards
 } from '@nestjs/common';
@@ -11,12 +12,14 @@ import { TipoIntegracao } from '@prisma/client';
 
 import { JwtCookieAuthGuard } from '../../auth/guards/jwt-cookie-auth.guard';
 import { SaveCompanyIntegrationDto } from '../dto/save-company-integration.dto';
+import { CompanyIntegrationExecutionService } from '../services/company-integration-execution.service';
 import { CompanyIntegrationsService } from '../services/company-integrations.service';
 
 @UseGuards(JwtCookieAuthGuard)
 @Controller('companies/:companyId/integrations')
 export class CompanyIntegrationsController {
   constructor(
+    private readonly companyIntegrationExecutionService: CompanyIntegrationExecutionService,
     private readonly companyIntegrationsService: CompanyIntegrationsService
   ) {}
 
@@ -45,6 +48,18 @@ export class CompanyIntegrationsController {
       companyId,
       tipoIntegracao,
       saveCompanyIntegrationDto
+    );
+  }
+
+  @Post(':tipoIntegracao/execute')
+  execute(
+    @Param('companyId') companyId: string,
+    @Param('tipoIntegracao', new ParseEnumPipe(TipoIntegracao))
+    tipoIntegracao: TipoIntegracao
+  ) {
+    return this.companyIntegrationExecutionService.execute(
+      companyId,
+      tipoIntegracao
     );
   }
 }

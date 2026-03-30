@@ -104,6 +104,17 @@ export type CompanyIntegrationUpsertInput = {
   ultimoSucessoEm?: string | null | undefined;
 };
 
+export type CompanyIntegrationExecutionAttempt = {
+  message: string;
+  observacoes?: string | null | undefined;
+  success: boolean;
+};
+
+export type CompanyIntegrationExecutionResponse = {
+  execution: CompanyIntegrationExecutionAttempt;
+  integration: CompanyIntegration;
+};
+
 export type CompanyDetailItem = CompanyBase & {
   integracoes: CompanyIntegration[];
   responsavelInterno: ResponsavelInternoDetail | null;
@@ -391,6 +402,20 @@ export async function upsertCompanyIntegration(
     {
       body: payload,
       method: 'PATCH'
+    }
+  );
+}
+
+export async function executeCompanyIntegration(
+  companyId: string,
+  tipoIntegracao: TipoIntegracao
+): Promise<CompanyIntegrationExecutionResponse> {
+  return apiRequest<CompanyIntegrationExecutionResponse>(
+    `/companies/${companyId}/integrations/${encodeURIComponent(
+      tipoIntegracao
+    )}/execute`,
+    {
+      method: 'POST'
     }
   );
 }

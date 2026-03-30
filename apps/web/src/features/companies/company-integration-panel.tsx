@@ -4,9 +4,11 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
 import {
+  executeCompanyIntegration,
   getCompanyIntegration,
   upsertCompanyIntegration,
   type CompanyIntegration,
+  type CompanyIntegrationExecutionResponse,
   type CompanyIntegrationUpsertInput,
   type StatusIntegracao,
   type TipoIntegracao
@@ -86,12 +88,14 @@ export function CompanyIntegrationPanel({
   companyId: string;
 }) {
   const router = useRouter();
+  const executeLockRef = useRef(false);
   const saveLockRef = useRef(false);
   const [form, setForm] = useState<CompanyIntegrationFormState>(
     initialIntegrationFormState
   );
   const [exists, setExists] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [isExecuting, setIsExecuting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -167,7 +171,7 @@ export function CompanyIntegrationPanel({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (saveLockRef.current) {
+    if (saveLockRef.current || isExecuting) {
       return;
     }
 
@@ -212,6 +216,52 @@ export function CompanyIntegrationPanel({
     } finally {
       saveLockRef.current = false;
       setIsSaving(false);
+    }
+  }
+
+  async function handleExecute() {
+    if (executeLockRef.current || isSaving) {
+      return;
+    }
+
+    executeLockRef.current = true;
+    setIsExecuting(true);
+    setError('');
+    setMessage('');
+
+    try {
+      if (!companyId) {
+        throw new Error('Empresa invalida.');
+      }
+
+      const response: CompanyIntegrationExecutionResponse =
+        await executeCompanyIntegration(companyId, PRIORITY_INTEGRATION_TYPE);
+
+      setExists(true);
+      setForm(toIntegrationFormState(response.integration));
+
+      if (response.execution.success) {
+        setMessage(response.execution.message);
+      } else {
+        setError(response.execution.message);
+      }
+    } catch (executionError) {
+      if (
+        executionError instanceof Error &&
+        executionError.message === 'Nao autenticado.'
+      ) {
+        router.replace('/login');
+        return;
+      }
+
+      setError(
+        executionError instanceof Error
+          ? executionError.message
+          : 'Falha ao executar integracao.'
+      );
+    } finally {
+      executeLockRef.current = false;
+      setIsExecuting(false);
     }
   }
 
@@ -307,7 +357,28 @@ export function CompanyIntegrationPanel({
 
         <div className="xl:w-[28rem]">
           <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-            <fieldset className="space-y-4" disabled={isSaving}>
+            <fieldset className="space-y-4" disabled={isSaving || isExecuting}>
+              <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    Execucao manual controlada
+                  </h3>
+                  <p className="text-xs leading-5 text-slate-600">
+                    Aciona apenas a consulta de{' '}
+                    {TIPO_INTEGRACAO_LABELS[PRIORITY_INTEGRATION_TYPE]} para
+                    esta empresa e atualiza o registro operacional.
+                  </p>
+                </div>
+                <button
+                  className="inline-flex w-full items-center justify-center rounded-xl border border-sky-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isSaving || isExecuting}
+                  onClick={() => void handleExecute()}
+                  type="button"
+                >
+                  {isExecuting ? 'Executando...' : 'Executar consulta agora'}
+                </button>
+              </div>
+
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-slate-700">
                   Status da integracao
@@ -425,8 +496,8 @@ export function CompanyIntegrationPanel({
             <div className="flex flex-wrap gap-3">
               <button
                 className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                aria-busy={isSaving}
-                disabled={isSaving}
+                aria-busy={isSaving || isExecuting}
+                disabled={isSaving || isExecuting}
                 type="submit"
               >
                 {isSaving
