@@ -70,8 +70,12 @@ export class CompaniesService {
       naCarteira: dto.naCarteira ?? false,
       pendenciaOperacional: dto.pendenciaOperacional ?? false,
       observacoesOperacionais: dto.observacoesOperacionais?.trim() || null,
+      ultimaConferenciaAcessoEm:
+        this.normalizeDate(dto.ultimaConferenciaAcessoEm) ?? null,
       ultimaConferenciaOperacionalEm:
         this.normalizeDate(dto.ultimaConferenciaOperacionalEm) ?? null,
+      ultimaConferenciaProcuracaoEm:
+        this.normalizeDate(dto.ultimaConferenciaProcuracaoEm) ?? null,
       regularizadaEm: this.normalizeDate(dto.regularizadaEm) ?? null,
       razaoSocial: dto.razaoSocial.trim(),
       regimeTributario: dto.regimeTributario,
@@ -183,6 +187,26 @@ export class CompaniesService {
 
       if (ultimaConferenciaOperacionalEm !== undefined) {
         data.ultimaConferenciaOperacionalEm = ultimaConferenciaOperacionalEm;
+      }
+    }
+
+    if (dto.ultimaConferenciaAcessoEm !== undefined) {
+      const ultimaConferenciaAcessoEm = this.normalizeDate(
+        dto.ultimaConferenciaAcessoEm
+      );
+
+      if (ultimaConferenciaAcessoEm !== undefined) {
+        data.ultimaConferenciaAcessoEm = ultimaConferenciaAcessoEm;
+      }
+    }
+
+    if (dto.ultimaConferenciaProcuracaoEm !== undefined) {
+      const ultimaConferenciaProcuracaoEm = this.normalizeDate(
+        dto.ultimaConferenciaProcuracaoEm
+      );
+
+      if (ultimaConferenciaProcuracaoEm !== undefined) {
+        data.ultimaConferenciaProcuracaoEm = ultimaConferenciaProcuracaoEm;
       }
     }
 

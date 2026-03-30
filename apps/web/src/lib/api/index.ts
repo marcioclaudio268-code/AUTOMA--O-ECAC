@@ -72,7 +72,9 @@ export type CompanyBase = {
   responsavelInternoId: string | null;
   statusAcesso: StatusAcessoEmpresa;
   statusProcuracao: StatusProcuracaoEmpresa;
+  ultimaConferenciaAcessoEm: string | null;
   ultimaConferenciaOperacionalEm: string | null;
+  ultimaConferenciaProcuracaoEm: string | null;
   regularizadaEm: string | null;
   ultimaVarreduraEm: string | null;
   ultimoEventoRelevanteEm: string | null;
@@ -112,8 +114,10 @@ export type CompanyCreateInput = {
   statusAcesso?: StatusAcessoEmpresa | undefined;
   statusProcuracao?: StatusProcuracaoEmpresa | undefined;
   pendenciaOperacional?: boolean | undefined;
+  ultimaConferenciaAcessoEm?: string | null | undefined;
   regularizadaEm?: string | null | undefined;
   ultimaConferenciaOperacionalEm?: string | null | undefined;
+  ultimaConferenciaProcuracaoEm?: string | null | undefined;
 };
 
 export type CompanyUpdateInput = Partial<CompanyCreateInput>;
