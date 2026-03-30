@@ -110,6 +110,13 @@ export type CompanyIntegrationExecutionAttempt = {
   success: boolean;
 };
 
+export type CompanyIntegrationExecutionInput = {
+  outorgado: string;
+  outorgante: string;
+  tipoOutorgado?: 'CPF' | 'CNPJ' | undefined;
+  tipoOutorgante?: 'CPF' | 'CNPJ' | undefined;
+};
+
 export type CompanyIntegrationExecutionResponse = {
   execution: CompanyIntegrationExecutionAttempt;
   integration: CompanyIntegration;
@@ -408,13 +415,15 @@ export async function upsertCompanyIntegration(
 
 export async function executeCompanyIntegration(
   companyId: string,
-  tipoIntegracao: TipoIntegracao
+  tipoIntegracao: TipoIntegracao,
+  payload: CompanyIntegrationExecutionInput
 ): Promise<CompanyIntegrationExecutionResponse> {
   return apiRequest<CompanyIntegrationExecutionResponse>(
     `/companies/${companyId}/integrations/${encodeURIComponent(
       tipoIntegracao
     )}/execute`,
     {
+      body: payload,
       method: 'POST'
     }
   );

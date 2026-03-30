@@ -11,6 +11,7 @@ import {
 import { TipoIntegracao } from '@prisma/client';
 
 import { JwtCookieAuthGuard } from '../../auth/guards/jwt-cookie-auth.guard';
+import { ExecuteCompanyIntegrationDto } from '../dto/execute-company-integration.dto';
 import { SaveCompanyIntegrationDto } from '../dto/save-company-integration.dto';
 import { CompanyIntegrationExecutionService } from '../services/company-integration-execution.service';
 import { CompanyIntegrationsService } from '../services/company-integrations.service';
@@ -55,11 +56,13 @@ export class CompanyIntegrationsController {
   execute(
     @Param('companyId') companyId: string,
     @Param('tipoIntegracao', new ParseEnumPipe(TipoIntegracao))
-    tipoIntegracao: TipoIntegracao
+    tipoIntegracao: TipoIntegracao,
+    @Body() executeCompanyIntegrationDto: ExecuteCompanyIntegrationDto
   ) {
     return this.companyIntegrationExecutionService.execute(
       companyId,
-      tipoIntegracao
+      tipoIntegracao,
+      executeCompanyIntegrationDto
     );
   }
 }

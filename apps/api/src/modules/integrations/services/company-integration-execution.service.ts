@@ -6,6 +6,7 @@ import { IntegraContadorAdapter } from '../adapters/integra-contador.adapter';
 import {
   CompanyIntegrationExecutionAttempt,
   CompanyIntegrationExecutionContext,
+  CompanyIntegrationExecutionInput,
   CompanyIntegrationRecord,
   companyIntegrationSelect
 } from '../company-integration.shared';
@@ -24,7 +25,8 @@ export class CompanyIntegrationExecutionService {
 
   async execute(
     companyId: string,
-    tipoIntegracao: TipoIntegracao
+    tipoIntegracao: TipoIntegracao,
+    input: CompanyIntegrationExecutionInput
   ): Promise<CompanyIntegrationExecutionResponse> {
     if (tipoIntegracao !== TipoIntegracao.INTEGRA_CONTADOR) {
       throw new BadRequestException(
@@ -33,7 +35,7 @@ export class CompanyIntegrationExecutionService {
     }
 
     const company = await this.assertCompanyExists(companyId);
-    const execution = await this.integraContadorAdapter.execute(company);
+    const execution = await this.executeIntegration(company, input);
     const timestamp = new Date();
 
     const integration = await this.prisma.integracaoEmpresa.upsert({
@@ -131,5 +133,22 @@ export class CompanyIntegrationExecutionService {
       nomeFantasia: company.nomeFantasia ?? null,
       razaoSocial: company.razaoSocial
     };
+  }
+
+  private async executeIntegration(
+    company: CompanyIntegrationExecutionContext,
+    input: CompanyIntegrationExecutionInput
+  ): Promise<CompanyIntegrationExecutionAttempt> {
+    try {
+      return await this.integraContadorAdapter.execute(company, input);
+    } catch (error) {
+      return {
+        message:
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : 'Falha inesperada ao executar INTEGRA_CONTADOR.',
+        success: false
+      };
+    }
   }
 }

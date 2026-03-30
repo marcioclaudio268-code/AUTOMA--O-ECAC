@@ -570,7 +570,12 @@ export default function CompanyDetailPage() {
           </section>
         ) : null}
 
-        {company ? <CompanyIntegrationPanel companyId={company.id} /> : null}
+        {company ? (
+          <CompanyIntegrationPanel
+            companyCnpj={company.cnpj}
+            companyId={company.id}
+          />
+        ) : null}
 
         {company ? (
           <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">

@@ -1,13 +1,10 @@
 import { Prisma } from '@prisma/client';
 
-export const INTEGRA_CONTADOR_NOT_CONFIGURED_MESSAGE =
-  'Integracao INTEGRA_CONTADOR nao configurada. Consulte docs/integracoes/integra-contador-http-contract.md e preencha INTEGRA_CONTADOR_HTTP_CONTRACT_JSON.';
+import type { IntegraContadorPessoaTipo } from './utils/integra-contador-documents';
 
-export const INTEGRA_CONTADOR_CONTRACT_INVALID_MESSAGE =
-  'Configuracao de INTEGRA_CONTADOR invalida. Revise o JSON informado.';
-
-export const INTEGRA_CONTADOR_CONTRACT_READY_MESSAGE =
-  'Contrato de INTEGRA_CONTADOR completo no ambiente, mas a chamada real ainda nao foi conectada neste bloco.';
+export const INTEGRA_CONTADOR_PROCURACOES_SYSTEM_ID = 'PROCURACOES';
+export const INTEGRA_CONTADOR_PROCURACOES_SERVICE_ID = 'OBTERPROCURACAO41';
+export const INTEGRA_CONTADOR_PROCURACOES_SYSTEM_VERSION = '1';
 
 export const companyIntegrationSelect = {
   createdAt: true,
@@ -31,6 +28,13 @@ export type CompanyIntegrationExecutionContext = {
   companyId: string;
   nomeFantasia: string | null;
   razaoSocial: string;
+};
+
+export type CompanyIntegrationExecutionInput = {
+  outorgado: string;
+  outorgante: string;
+  tipoOutorgado?: IntegraContadorPessoaTipo | undefined;
+  tipoOutorgante?: IntegraContadorPessoaTipo | undefined;
 };
 
 export type CompanyIntegrationExecutionAttempt = {

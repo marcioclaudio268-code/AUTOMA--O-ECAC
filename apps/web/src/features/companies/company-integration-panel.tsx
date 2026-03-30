@@ -8,6 +8,7 @@ import {
   getCompanyIntegration,
   upsertCompanyIntegration,
   type CompanyIntegration,
+  type CompanyIntegrationExecutionInput,
   type CompanyIntegrationExecutionResponse,
   type CompanyIntegrationUpsertInput,
   type StatusIntegracao,
@@ -19,6 +20,7 @@ import {
   TIPO_INTEGRACAO_LABELS
 } from '@/lib/constants';
 import { formatDateTime, toDateTimeLocalValue } from '@/lib/formatters';
+import { normalizeDigits } from '@/lib/validators';
 
 type CompanyIntegrationFormState = {
   mensagemErroAtual: string;
@@ -26,6 +28,15 @@ type CompanyIntegrationFormState = {
   statusIntegracao: StatusIntegracao;
   ultimoErroEm: string;
   ultimoSucessoEm: string;
+};
+
+type ExecutionDocumentType = '' | 'CPF' | 'CNPJ';
+
+type CompanyIntegrationExecutionFormState = {
+  outorgado: string;
+  outorgante: string;
+  tipoOutorgado: ExecutionDocumentType;
+  tipoOutorgante: ExecutionDocumentType;
 };
 
 const PRIORITY_INTEGRATION_TYPE: TipoIntegracao = 'INTEGRA_CONTADOR';
@@ -54,7 +65,7 @@ function toIntegrationFormState(
   };
 }
 
-function buildPayload(
+function buildManualPayload(
   form: CompanyIntegrationFormState
 ): CompanyIntegrationUpsertInput {
   return {
@@ -70,6 +81,54 @@ function buildPayload(
   };
 }
 
+function initialExecutionFormState(
+  companyCnpj: string
+): CompanyIntegrationExecutionFormState {
+  return {
+    outorgado: '',
+    outorgante: normalizeDigits(companyCnpj),
+    tipoOutorgado: '',
+    tipoOutorgante: ''
+  };
+}
+
+function normalizeExecutionType(
+  value: ExecutionDocumentType
+): 'CPF' | 'CNPJ' | undefined {
+  return value === '' ? undefined : value;
+}
+
+function buildExecutionPayload(
+  form: CompanyIntegrationExecutionFormState,
+  companyCnpj: string
+): CompanyIntegrationExecutionInput {
+  const outorgante = normalizeDigits(form.outorgante) || normalizeDigits(companyCnpj);
+  const outorgado = normalizeDigits(form.outorgado);
+
+  if (!outorgante) {
+    throw new Error('Informe o outorgante da procuração.');
+  }
+
+  if (![11, 14].includes(outorgante.length)) {
+    throw new Error('Outorgante deve conter 11 ou 14 digitos.');
+  }
+
+  if (!outorgado) {
+    throw new Error('Informe o outorgado da procuração.');
+  }
+
+  if (![11, 14].includes(outorgado.length)) {
+    throw new Error('Outorgado deve conter 11 ou 14 digitos.');
+  }
+
+  return {
+    outorgado,
+    outorgante,
+    tipoOutorgado: normalizeExecutionType(form.tipoOutorgado),
+    tipoOutorgante: normalizeExecutionType(form.tipoOutorgante)
+  };
+}
+
 function formatIntegrationText(
   value: string | null | undefined,
   fallback: string
@@ -82,9 +141,23 @@ function formatIntegrationDate(value: string | null | undefined) {
   return value ? formatDateTime(value) : 'Nao registrada';
 }
 
+function formatOperationalSuccess(status: StatusIntegracao): string {
+  return status === 'ATIVA' ? 'Sim' : 'Nao';
+}
+
+function buildTypeOptions() {
+  return [
+    { label: 'Auto', value: '' as const },
+    { label: 'CPF', value: 'CPF' as const },
+    { label: 'CNPJ', value: 'CNPJ' as const }
+  ];
+}
+
 export function CompanyIntegrationPanel({
+  companyCnpj,
   companyId
 }: {
+  companyCnpj: string;
   companyId: string;
 }) {
   const router = useRouter();
@@ -93,12 +166,22 @@ export function CompanyIntegrationPanel({
   const [form, setForm] = useState<CompanyIntegrationFormState>(
     initialIntegrationFormState
   );
+  const [executionForm, setExecutionForm] = useState<CompanyIntegrationExecutionFormState>(
+    () => initialExecutionFormState(companyCnpj)
+  );
   const [exists, setExists] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isExecuting, setIsExecuting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    setExecutionForm((current) => ({
+      ...current,
+      outorgante: normalizeDigits(companyCnpj)
+    }));
+  }, [companyCnpj]);
 
   useEffect(() => {
     let active = true;
@@ -189,7 +272,7 @@ export function CompanyIntegrationPanel({
       const saved = await upsertCompanyIntegration(
         companyId,
         PRIORITY_INTEGRATION_TYPE,
-        buildPayload(form)
+        buildManualPayload(form)
       );
 
       setExists(true);
@@ -234,8 +317,13 @@ export function CompanyIntegrationPanel({
         throw new Error('Empresa invalida.');
       }
 
+      const payload = buildExecutionPayload(executionForm, companyCnpj);
       const response: CompanyIntegrationExecutionResponse =
-        await executeCompanyIntegration(companyId, PRIORITY_INTEGRATION_TYPE);
+        await executeCompanyIntegration(
+          companyId,
+          PRIORITY_INTEGRATION_TYPE,
+          payload
+        );
 
       setExists(true);
       setForm(toIntegrationFormState(response.integration));
@@ -273,6 +361,8 @@ export function CompanyIntegrationPanel({
     );
   }
 
+  const typeOptions = buildTypeOptions();
+
   return (
     <section className="rounded-2xl border border-sky-200 bg-sky-50/70 p-5 shadow-sm">
       <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
@@ -302,10 +392,10 @@ export function CompanyIntegrationPanel({
             </div>
             <div className="rounded-xl border border-sky-200 bg-white/90 px-3 py-2">
               <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Status
+                Sucesso operacional
               </dt>
               <dd className="mt-1 text-sm font-medium text-slate-900">
-                {STATUS_INTEGRACAO_LABELS[form.statusIntegracao]}
+                {formatOperationalSuccess(form.statusIntegracao)}
               </dd>
             </div>
             <div className="rounded-xl border border-sky-200 bg-white/90 px-3 py-2">
@@ -334,12 +424,12 @@ export function CompanyIntegrationPanel({
             </div>
             <div className="rounded-xl border border-sky-200 bg-white/90 px-3 py-2">
               <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Falha atual
+                Mensagem operacional
               </dt>
               <dd className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-900">
                 {formatIntegrationText(
-                  form.mensagemErroAtual,
-                  'Sem falha registrada.'
+                  message || form.mensagemErroAtual,
+                  'Sem mensagem operacional.'
                 )}
               </dd>
             </div>
@@ -361,14 +451,103 @@ export function CompanyIntegrationPanel({
               <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
                 <div className="space-y-1">
                   <h3 className="text-sm font-semibold text-slate-900">
-                    Execucao manual controlada
+                    Execucao manual da procuracao
                   </h3>
                   <p className="text-xs leading-5 text-slate-600">
-                    Aciona apenas a consulta de{' '}
-                    {TIPO_INTEGRACAO_LABELS[PRIORITY_INTEGRATION_TYPE]} para
-                    esta empresa e atualiza o registro operacional.
+                    Executa o POST /Consultar real do Integra Contador para{' '}
+                    PROCURACOES / OBTERPROCURACAO41.
+                  </p>
+                  <p className="text-xs leading-5 text-slate-600">
+                    Contratante e autorPedidoDados sao lidos do ambiente.
                   </p>
                 </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-2 sm:col-span-2">
+                    <span className="block text-sm font-medium text-slate-700">
+                      Outorgante
+                    </span>
+                    <input
+                      className="w-full rounded-xl border border-sky-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                      name="outorgante"
+                      onChange={(event) =>
+                        setExecutionForm((current) => ({
+                          ...current,
+                          outorgante: event.target.value
+                        }))
+                      }
+                      placeholder="CPF ou CNPJ do outorgante"
+                      type="text"
+                      value={executionForm.outorgante}
+                    />
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="block text-sm font-medium text-slate-700">
+                      Tipo outorgante
+                    </span>
+                    <select
+                      className="w-full rounded-xl border border-sky-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                      name="tipoOutorgante"
+                      onChange={(event) =>
+                        setExecutionForm((current) => ({
+                          ...current,
+                          tipoOutorgante: event.target.value as ExecutionDocumentType
+                        }))
+                      }
+                      value={executionForm.tipoOutorgante}
+                    >
+                      {typeOptions.map((option) => (
+                        <option key={option.label} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="block text-sm font-medium text-slate-700">
+                      Tipo outorgado
+                    </span>
+                    <select
+                      className="w-full rounded-xl border border-sky-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                      name="tipoOutorgado"
+                      onChange={(event) =>
+                        setExecutionForm((current) => ({
+                          ...current,
+                          tipoOutorgado: event.target.value as ExecutionDocumentType
+                        }))
+                      }
+                      value={executionForm.tipoOutorgado}
+                    >
+                      {typeOptions.map((option) => (
+                        <option key={option.label} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-2 sm:col-span-2">
+                    <span className="block text-sm font-medium text-slate-700">
+                      Outorgado
+                    </span>
+                    <input
+                      className="w-full rounded-xl border border-sky-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                      name="outorgado"
+                      onChange={(event) =>
+                        setExecutionForm((current) => ({
+                          ...current,
+                          outorgado: event.target.value
+                        }))
+                      }
+                      placeholder="CPF ou CNPJ do outorgado"
+                      type="text"
+                      value={executionForm.outorgado}
+                    />
+                  </label>
+                </div>
+
                 <button
                   className="inline-flex w-full items-center justify-center rounded-xl border border-sky-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={isSaving || isExecuting}
@@ -475,24 +654,6 @@ export function CompanyIntegrationPanel({
               </label>
             </fieldset>
 
-            {error ? (
-              <p
-                className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"
-                role="alert"
-              >
-                {error}
-              </p>
-            ) : null}
-
-            {message ? (
-              <p
-                className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
-                role="status"
-              >
-                {message}
-              </p>
-            ) : null}
-
             <div className="flex flex-wrap gap-3">
               <button
                 className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
@@ -510,6 +671,24 @@ export function CompanyIntegrationPanel({
           </form>
         </div>
       </div>
+
+      {error ? (
+        <p
+          className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"
+          role="alert"
+        >
+          {error}
+        </p>
+      ) : null}
+
+      {message ? (
+        <p
+          className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
+          role="status"
+        >
+          {message}
+        </p>
+      ) : null}
     </section>
   );
 }

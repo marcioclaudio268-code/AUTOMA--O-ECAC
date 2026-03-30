@@ -1,104 +1,154 @@
-# Integra Contador HTTP Contract
+# Integra Contador - Procuracoes / OBTERPROCURACAO41
 
-## Status atual
+## Status
 
-Bloqueada.
+Ativo para o primeiro fluxo real.
 
-Nao foi encontrado no repositorio nenhum contrato externo concreto para a integracao `INTEGRA_CONTADOR` com endpoint, auth, payload, headers, timeout ou shape de resposta reais.
+Este documento registra somente o slice implementado neste branch:
 
-O que existe hoje e apenas a base operacional interna para registrar e executar tentativas manuais por empresa.
+- tipo de integracao: `INTEGRA_CONTADOR`
+- endpoint de negocio: `POST /Consultar`
+- sistema: `PROCURACOES`
+- servico: `OBTERPROCURACAO41`
+- versaoSistema: `1`
 
-## Evidencia concreta encontrada
+## Autenticacao oficial
 
-- `apps/api/src/prisma/schema.prisma` contem o enum `TipoIntegracao` com `INTEGRA_CONTADOR`.
-- `apps/api/src/prisma/seed.ts` cria registros iniciais de `IntegracaoEmpresa` para `INTEGRA_CONTADOR`.
-- `apps/api/src/modules/integrations/*` contem a base operacional interna da integracao por empresa e a execucao manual controlada.
-- `apps/web/src/features/companies/company-integration-panel.tsx` exibe o bloco operacional da empresa e a acao manual.
-- `.env.example` contem o contrato explicito `INTEGRA_CONTADOR_HTTP_CONTRACT_JSON`.
-- Nao foram encontrados client HTTP, endpoint externo, payload real, exemplo de resposta real, credenciais reais ou documentacao externa do contador.
+O backend autentica na API oficial do SERPRO com:
 
-## Lacunas que continuam sem definicao
+- `POST https://autenticacao.sapi.serpro.gov.br/authenticate`
+- `Authorization: Basic base64(consumerKey:consumerSecret)`
+- `Role-Type: TERCEIROS`
+- `Content-Type: application/x-www-form-urlencoded`
+- body `grant_type=client_credentials`
+- certificado digital do contratante
 
-- `http.baseUrl`
-- `http.method`
-- `http.path`
-- `http.auth`
-- `http.headers`
-- `http.timeoutMs`
-- `http.request.bodyDescription`
-- `http.request.pathParameters`
-- `http.request.queryParameters`
-- `http.response.successDescription`
-- `http.response.failureDescription`
-- semantica real de sucesso e falha
+A resposta precisa fornecer:
 
-## Contrato de configuracao esperado
+- `access_token`
+- `jwt_token`
 
-O backend passa a aceitar um JSON explicito em `INTEGRA_CONTADOR_HTTP_CONTRACT_JSON`.
+## Configuracao minima
 
-Forma esperada:
+Variaveis de ambiente usadas por este slice:
+
+- `INTEGRA_CONTADOR_CONSUMER_KEY`
+- `INTEGRA_CONTADOR_CONSUMER_SECRET`
+- `INTEGRA_CONTADOR_CERT_PATH`
+- `INTEGRA_CONTADOR_CERT_PASSWORD`
+- `INTEGRA_CONTADOR_CONTRATANTE_NUMERO`
+
+Observacao:
+
+- `INTEGRA_CONTADOR_CONTRATANTE_NUMERO` representa o NI do escritorio.
+- o mesmo NI e usado como `contratante` e `autorPedidoDados`.
+- o caminho do certificado deve apontar para um arquivo PFX/P12 valido.
+
+## Chamada de negocio
+
+O backend faz:
+
+- `POST https://gateway.apiserpro.serpro.gov.br/integra-contador/v1/Consultar`
+- `Authorization: Bearer <access_token>`
+- `jwt_token: <jwt_token>`
+- `Content-Type: application/json`
+
+O payload segue o contrato real do cliente oficial:
 
 ```json
 {
-  "specVersion": 1,
-  "sourceDocument": "docs/integracoes/integra-contador-http-contract.md",
-  "status": "blocked",
-  "summary": "Contrato externo nao localizado no repositorio.",
-  "missing": [
-    "http.baseUrl",
-    "http.method",
-    "http.path",
-    "http.auth",
-    "http.headers",
-    "http.timeoutMs",
-    "http.request.bodyDescription",
-    "http.request.pathParameters",
-    "http.request.queryParameters",
-    "http.response.successDescription",
-    "http.response.failureDescription"
-  ],
-  "http": {
-    "baseUrl": null,
-    "method": null,
-    "path": null,
-    "timeoutMs": null,
-    "auth": {
-      "kind": null,
-      "headerName": null,
-      "envVarName": null,
-      "tokenPrefix": null
-    },
-    "headers": {},
-    "request": {
-      "bodyDescription": null,
-      "pathParameters": [],
-      "queryParameters": []
-    },
-    "response": {
-      "successDescription": null,
-      "failureDescription": null
-    }
+  "contratante": {
+    "numero": "NI_DO_ESCRITORIO",
+    "tipo": 2
+  },
+  "autorPedidoDados": {
+    "numero": "NI_DO_ESCRITORIO",
+    "tipo": 2
+  },
+  "contribuinte": {
+    "numero": "NI_DO_OUTORGANTE",
+    "tipo": 2
+  },
+  "pedidoDados": {
+    "idSistema": "PROCURACOES",
+    "idServico": "OBTERPROCURACAO41",
+    "versaoSistema": "1",
+    "dados": "{\"outorgante\":\"NI_DO_OUTORGANTE\",\"tipoOutorgante\":\"2\",\"outorgado\":\"NI_DO_OUTORGADO\",\"tipoOutorgado\":\"2\"}"
   }
 }
 ```
 
-## Regras do contrato
+## Regra fixa deste slice
 
-- `specVersion` e `sourceDocument` sao obrigatorios.
-- `sourceDocument` precisa apontar para este arquivo.
-- `status` pode ser `blocked`, `partial` ou `ready`.
-- Quando `status` for `blocked` ou `partial`, `missing` precisa listar ao menos um campo pendente.
-- Quando `status` for `ready`, `missing` precisa estar vazio.
-- O contrato nao autoriza chamada externa por si so. Ele apenas registra a forma esperada e o estado atual.
+Nesta implementacao a regra operacional foi fixada assim:
 
-## O que falta para conectar a chamada real
+- `contribuinte = outorgante`
+- `contratante = autorPedidoDados = escritorio`
+- `outorgante = cliente`
+- `outorgado = escritorio`
 
-1. Obter o contrato externo verdadeiro do provedor.
-2. Preencher `baseUrl`, `method`, `path`, auth, headers, timeout e shape de request/response com dados concretos.
-3. Substituir o ramo bloqueado do adaptador por um cliente HTTP real.
-4. Manter a persistencia atual em `IntegracaoEmpresa` sem criar automacao paralela.
+O tipo de pessoa usa o codigo do cliente oficial:
 
-## Leitura operacional
+- `CPF -> 1`
+- `CNPJ -> 2`
 
-Enquanto o contrato externo nao existir de forma concreta, a execucao manual continua bloqueada com erro operacional honesto.
-Isso evita falso positivo e deixa o fluxo pronto para o proximo passo real.
+## Erros tratados
+
+O backend trata minimamente:
+
+- `401` como falha de autenticacao ou token expirado
+- `403` como acesso negado ou procuracao/servico nao autorizado
+- `400` como entrada invalida
+- `429` como limite de requisicoes
+- `500` e `503` como falha ou indisponibilidade externa
+
+Atencao especial foi dada a:
+
+- `AcessoNegado-PROCURACOES-40300`
+- `ICGERENCIADOR-022`
+- `ICGERENCIADOR-041`
+- `ICGERENCIADOR-044`
+- `ICGERENCIADOR-045`
+- `ICGERENCIADOR-052`
+
+O erro de negocio `AcessoNegado-PROCURACOES-40300` e preservado de forma literal quando a API retorna:
+
+- `Outorgante diferente do Contribuinte.`
+
+## Persistencia operacional
+
+Ao executar a integracao:
+
+- sucesso atualiza `statusIntegracao`, `ultimoSucessoEm` e limpa `mensagemErroAtual`
+- falha atualiza `statusIntegracao = ERRO`, `ultimoErroEm` e grava `mensagemErroAtual`
+- `observacoes` so sao alteradas quando o fluxo real precisa sobrescrever o valor
+
+## Tela de execucao
+
+A execucao manual continua concentrada em:
+
+- `/empresas/[id]`
+
+O painel reaproveitado permite:
+
+- executar o primeiro fluxo real
+- informar outorgante
+- informar outorgado
+- opcionalmente ajustar `tipoOutorgante` e `tipoOutorgado`
+
+## Fora de escopo
+
+Este documento nao abre outras frentes do Integra Contador.
+
+- DCTFWEB
+- SITFIS
+- parcelamentos
+- divida ativa
+- fila
+- cron
+- worker
+- webhook
+- polling
+- batch
+- novo painel
+- nova pagina
