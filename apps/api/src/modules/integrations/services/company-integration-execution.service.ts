@@ -1,5 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, StatusIntegracao, TipoIntegracao } from '@prisma/client';
+import {
+  Prisma,
+  StatusIntegracao,
+  StatusProcuracaoEmpresa,
+  TipoIntegracao
+} from '@prisma/client';
 
 import { PrismaService } from '../../../prisma/prisma.service';
 import { IntegraContadorAdapter } from '../adapters/integra-contador.adapter';
@@ -12,9 +17,20 @@ import {
 } from '../company-integration.shared';
 
 type CompanyIntegrationExecutionResponse = {
+  company: CompanyOperationalUpdate | null;
   execution: CompanyIntegrationExecutionAttempt;
   integration: CompanyIntegrationRecord;
 };
+
+type CompanyOperationalUpdate = {
+  observacoesOperacionais: string | null;
+  statusProcuracao: StatusProcuracaoEmpresa;
+  ultimaConferenciaOperacionalEm: Date | null;
+  updatedAt: Date;
+};
+
+const PROCURACAO_CONFIRMACAO_OBSERVACAO =
+  'Confirmacao via Integra Contador no fluxo PROCURACOES / OBTERPROCURACAO41.';
 
 @Injectable()
 export class CompanyIntegrationExecutionService {
@@ -38,21 +54,36 @@ export class CompanyIntegrationExecutionService {
     const execution = await this.executeIntegration(company, input);
     const timestamp = new Date();
 
-    const integration = await this.prisma.integracaoEmpresa.upsert({
-      create: this.buildCreateData(companyId, execution, timestamp),
-      select: companyIntegrationSelect,
-      update: this.buildUpdateData(execution, timestamp),
-      where: {
-        empresaId_tipoIntegracao: {
-          empresaId: companyId,
-          tipoIntegracao
+    const result = await this.prisma.$transaction(async (tx) => {
+      const integration = await tx.integracaoEmpresa.upsert({
+        create: this.buildCreateData(companyId, execution, timestamp),
+        select: companyIntegrationSelect,
+        update: this.buildUpdateData(execution, timestamp),
+        where: {
+          empresaId_tipoIntegracao: {
+            empresaId: companyId,
+            tipoIntegracao
+          }
         }
-      }
+      });
+
+      const companyUpdate = await this.updateCompanyAfterExecution(
+        tx,
+        company,
+        execution,
+        timestamp
+      );
+
+      return {
+        company: companyUpdate,
+        integration
+      };
     });
 
     return {
       execution,
-      integration
+      company: result.company,
+      integration: result.integration
     };
   }
 
@@ -116,6 +147,7 @@ export class CompanyIntegrationExecutionService {
         cnpj: true,
         id: true,
         nomeFantasia: true,
+        observacoesOperacionais: true,
         razaoSocial: true
       },
       where: {
@@ -131,6 +163,7 @@ export class CompanyIntegrationExecutionService {
       cnpj: company.cnpj,
       companyId: company.id,
       nomeFantasia: company.nomeFantasia ?? null,
+      observacoesOperacionais: company.observacoesOperacionais ?? null,
       razaoSocial: company.razaoSocial
     };
   }
@@ -143,12 +176,70 @@ export class CompanyIntegrationExecutionService {
       return await this.integraContadorAdapter.execute(company, input);
     } catch (error) {
       return {
+        haProcuracaoEncontrada: false,
         message:
           error instanceof Error && error.message.trim()
             ? error.message
             : 'Falha inesperada ao executar INTEGRA_CONTADOR.',
+        quantidadeRegistrosRetornados: 0,
         success: false
       };
     }
   }
+
+  private async updateCompanyAfterExecution(
+    tx: Prisma.TransactionClient,
+    company: CompanyIntegrationExecutionContext,
+    execution: CompanyIntegrationExecutionAttempt,
+    timestamp: Date
+  ): Promise<CompanyOperationalUpdate | null> {
+    if (!execution.success || !execution.haProcuracaoEncontrada) {
+      return null;
+    }
+
+    const observacoesOperacionais = buildOperationalObservation(
+      company.observacoesOperacionais
+    );
+
+    const updatedCompany = await tx.empresa.update({
+      data: {
+        observacoesOperacionais,
+        statusProcuracao: StatusProcuracaoEmpresa.VALIDA,
+        ultimaConferenciaOperacionalEm: timestamp
+      },
+      select: {
+        observacoesOperacionais: true,
+        statusProcuracao: true,
+        ultimaConferenciaOperacionalEm: true,
+        updatedAt: true
+      },
+      where: {
+        id: company.companyId
+      }
+    });
+
+    return {
+      observacoesOperacionais: updatedCompany.observacoesOperacionais,
+      statusProcuracao: updatedCompany.statusProcuracao,
+      ultimaConferenciaOperacionalEm:
+        updatedCompany.ultimaConferenciaOperacionalEm,
+      updatedAt: updatedCompany.updatedAt
+    };
+  }
+}
+
+function buildOperationalObservation(
+  currentObservation: string | null
+): string {
+  const normalizedCurrent = currentObservation?.trim();
+
+  if (!normalizedCurrent) {
+    return PROCURACAO_CONFIRMACAO_OBSERVACAO;
+  }
+
+  if (normalizedCurrent.includes(PROCURACAO_CONFIRMACAO_OBSERVACAO)) {
+    return normalizedCurrent;
+  }
+
+  return `${normalizedCurrent}\n${PROCURACAO_CONFIRMACAO_OBSERVACAO}`;
 }

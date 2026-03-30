@@ -42,7 +42,9 @@ export class IntegraContadorAdapter {
 
     if (!configState.ready) {
       return {
+        haProcuracaoEncontrada: false,
         message: configState.message,
+        quantidadeRegistrosRetornados: 0,
         success: false
       };
     }
@@ -65,6 +67,8 @@ export class IntegraContadorAdapter {
     } catch (error) {
       return {
         message: mapExecutionError(error),
+        haProcuracaoEncontrada: false,
+        quantidadeRegistrosRetornados: 0,
         success: false
       };
     }
@@ -209,6 +213,16 @@ function extractBusinessMessage(
   };
 }
 
+function getQuantidadeRegistrosRetornados(
+  response: IntegraContadorConsultResponse
+): number {
+  if (!Array.isArray(response.dados)) {
+    return 0;
+  }
+
+  return response.dados.length;
+}
+
 function normalizeMensagemNegocio(
   value: unknown
 ): IntegraContadorMensagemNegocio {
@@ -229,13 +243,44 @@ function normalizeMensagemNegocio(
 }
 
 function buildSuccessMessage(response: IntegraContadorConsultResponse): string {
-  const count = Array.isArray(response.dados) ? response.dados.length : null;
+  const count = getQuantidadeRegistrosRetornados(response);
 
-  if (count !== null) {
-    return `Consulta de procuracoes concluida com sucesso. Registros retornados: ${count}.`;
+  if (count > 0) {
+    const countLabel =
+      count === 1
+        ? '1 registro retornado'
+        : `${count} registros retornados`;
+    const foundLabel =
+      count === 1 ? 'Procuracao encontrada.' : 'Procuracoes encontradas.';
+
+    return `Consulta executada com sucesso. ${countLabel}. ${foundLabel}`;
   }
 
-  return 'Consulta de procuracoes concluida com sucesso.';
+  return 'Consulta executada com sucesso. Registros retornados: 0. Nenhuma procuracao encontrada.';
+}
+
+function buildSuccessAttempt(
+  response: IntegraContadorConsultResponse
+): CompanyIntegrationExecutionAttempt {
+  const quantidadeRegistrosRetornados = getQuantidadeRegistrosRetornados(response);
+
+  return {
+    haProcuracaoEncontrada: quantidadeRegistrosRetornados > 0,
+    message: buildSuccessMessage(response),
+    quantidadeRegistrosRetornados,
+    success: true
+  };
+}
+
+function buildFailureAttempt(
+  message: string
+): CompanyIntegrationExecutionAttempt {
+  return {
+    haProcuracaoEncontrada: false,
+    message,
+    quantidadeRegistrosRetornados: 0,
+    success: false
+  };
 }
 
 function buildFailureMessage(
@@ -297,32 +342,20 @@ function mapConsultationResponse(
   const parsed = normalizeConsultResponseBody(response.body);
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    return {
-      message: buildFailureMessage(response.statusCode, parsed),
-      success: false
-    };
+    return buildFailureAttempt(buildFailureMessage(response.statusCode, parsed));
   }
 
   if (parsed.sucesso === false) {
-    return {
-      message: buildFailureMessage(response.statusCode, parsed),
-      success: false
-    };
+    return buildFailureAttempt(buildFailureMessage(response.statusCode, parsed));
   }
 
   const { code } = extractBusinessMessage(parsed);
 
   if (isBusinessErrorCode(code)) {
-    return {
-      message: buildFailureMessage(response.statusCode, parsed),
-      success: false
-    };
+    return buildFailureAttempt(buildFailureMessage(response.statusCode, parsed));
   }
 
-  return {
-    message: buildSuccessMessage(parsed),
-    success: true
-  };
+  return buildSuccessAttempt(parsed);
 }
 
 function normalizeConsultResponseBody(

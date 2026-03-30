@@ -106,7 +106,7 @@ function buildExecutionPayload(
   const outorgado = normalizeDigits(form.outorgado);
 
   if (!outorgante) {
-    throw new Error('Informe o outorgante da procuração.');
+    throw new Error('Informe o outorgante da procuracao.');
   }
 
   if (![11, 14].includes(outorgante.length)) {
@@ -114,7 +114,7 @@ function buildExecutionPayload(
   }
 
   if (!outorgado) {
-    throw new Error('Informe o outorgado da procuração.');
+    throw new Error('Informe o outorgado da procuracao.');
   }
 
   if (![11, 14].includes(outorgado.length)) {
@@ -141,10 +141,6 @@ function formatIntegrationDate(value: string | null | undefined) {
   return value ? formatDateTime(value) : 'Nao registrada';
 }
 
-function formatOperationalSuccess(status: StatusIntegracao): string {
-  return status === 'ATIVA' ? 'Sim' : 'Nao';
-}
-
 function buildTypeOptions() {
   return [
     { label: 'Auto', value: '' as const },
@@ -155,10 +151,14 @@ function buildTypeOptions() {
 
 export function CompanyIntegrationPanel({
   companyCnpj,
-  companyId
+  companyId,
+  onExecutionCompleted
 }: {
   companyCnpj: string;
   companyId: string;
+  onExecutionCompleted?: (
+    response: CompanyIntegrationExecutionResponse
+  ) => void;
 }) {
   const router = useRouter();
   const executeLockRef = useRef(false);
@@ -330,6 +330,7 @@ export function CompanyIntegrationPanel({
 
       if (response.execution.success) {
         setMessage(response.execution.message);
+        onExecutionCompleted?.(response);
       } else {
         setError(response.execution.message);
       }
@@ -392,10 +393,10 @@ export function CompanyIntegrationPanel({
             </div>
             <div className="rounded-xl border border-sky-200 bg-white/90 px-3 py-2">
               <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Sucesso operacional
+                Status da integracao
               </dt>
               <dd className="mt-1 text-sm font-medium text-slate-900">
-                {formatOperationalSuccess(form.statusIntegracao)}
+                {STATUS_INTEGRACAO_LABELS[form.statusIntegracao]}
               </dd>
             </div>
             <div className="rounded-xl border border-sky-200 bg-white/90 px-3 py-2">

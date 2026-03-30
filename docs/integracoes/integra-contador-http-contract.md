@@ -78,6 +78,20 @@ O payload segue o contrato real do cliente oficial:
 }
 ```
 
+## Resposta normalizada
+
+O backend converte o retorno do SERPRO em um resultado operacional com:
+
+- `success`
+- `message`
+- `quantidadeRegistrosRetornados`
+- `haProcuracaoEncontrada`
+
+Essa normalizacao separa:
+
+- consulta executada com sucesso
+- procuracao efetivamente encontrada
+
 ## Regra fixa deste slice
 
 Nesta implementacao a regra operacional foi fixada assim:
@@ -119,9 +133,14 @@ O erro de negocio `AcessoNegado-PROCURACOES-40300` e preservado de forma literal
 
 Ao executar a integracao:
 
-- sucesso atualiza `statusIntegracao`, `ultimoSucessoEm` e limpa `mensagemErroAtual`
+- sucesso tecnico atualiza `statusIntegracao`, `ultimoSucessoEm` e limpa `mensagemErroAtual`
 - falha atualiza `statusIntegracao = ERRO`, `ultimoErroEm` e grava `mensagemErroAtual`
-- `observacoes` so sao alteradas quando o fluxo real precisa sobrescrever o valor
+- quando a resposta de sucesso traz ao menos uma procuracao, a empresa recebe:
+  - `statusProcuracao = VALIDA`
+  - `ultimaConferenciaOperacionalEm` atualizado
+  - `observacoesOperacionais` com uma nota curta de confirmacao via Integra Contador
+- quando a resposta de sucesso nao traz procuracao, a empresa nao sofre alteracao automatica de status
+- `observacoes` da integracao so sao alteradas quando o fluxo real precisa sobrescrever o valor
 
 ## Tela de execucao
 

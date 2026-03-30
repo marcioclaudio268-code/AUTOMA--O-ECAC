@@ -11,6 +11,7 @@ import {
   listResponsaveis,
   updateCompany,
   type CompanyCreateInput,
+  type CompanyIntegrationExecutionResponse,
   type CompanyDetailItem,
   type CompanyUpdateInput,
   type RegimeTributario,
@@ -100,6 +101,24 @@ function toFormState(company: CompanyDetailItem): CompanyFormState {
     responsavelInternoId: company.responsavelInterno?.id ?? '',
     statusAcesso: company.statusAcesso,
     statusProcuracao: company.statusProcuracao
+  };
+}
+
+function applyExecutionUpdate(
+  company: CompanyDetailItem | null,
+  response: CompanyIntegrationExecutionResponse
+): CompanyDetailItem | null {
+  if (!company || !response.company) {
+    return company;
+  }
+
+  return {
+    ...company,
+    observacoesOperacionais: response.company.observacoesOperacionais,
+    statusProcuracao: response.company.statusProcuracao,
+    ultimaConferenciaOperacionalEm:
+      response.company.ultimaConferenciaOperacionalEm,
+    updatedAt: response.company.updatedAt
   };
 }
 
@@ -340,6 +359,26 @@ export default function CompanyDetailPage() {
     }
   }
 
+  function handleIntegrationExecutionCompleted(
+    response: CompanyIntegrationExecutionResponse
+  ) {
+    if (!response.company) {
+      return;
+    }
+
+    setCompany((current) => applyExecutionUpdate(current, response));
+    setForm((current) => ({
+      ...current,
+      observacoesOperacionais:
+        response.company?.observacoesOperacionais ?? current.observacoesOperacionais,
+      statusProcuracao:
+        response.company?.statusProcuracao ?? current.statusProcuracao,
+      ultimaConferenciaOperacionalEm: response.company
+        ? toDateTimeLocalValue(response.company.ultimaConferenciaOperacionalEm)
+        : current.ultimaConferenciaOperacionalEm
+    }));
+  }
+
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center px-6">
@@ -574,6 +613,7 @@ export default function CompanyDetailPage() {
           <CompanyIntegrationPanel
             companyCnpj={company.cnpj}
             companyId={company.id}
+            onExecutionCompleted={handleIntegrationExecutionCompleted}
           />
         ) : null}
 

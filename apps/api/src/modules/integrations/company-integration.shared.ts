@@ -27,6 +27,7 @@ export type CompanyIntegrationExecutionContext = {
   cnpj: string;
   companyId: string;
   nomeFantasia: string | null;
+  observacoesOperacionais: string | null;
   razaoSocial: string;
 };
 
@@ -38,7 +39,9 @@ export type CompanyIntegrationExecutionInput = {
 };
 
 export type CompanyIntegrationExecutionAttempt = {
+  haProcuracaoEncontrada: boolean;
   message: string;
   observacoes?: string | null;
+  quantidadeRegistrosRetornados: number;
   success: boolean;
 };

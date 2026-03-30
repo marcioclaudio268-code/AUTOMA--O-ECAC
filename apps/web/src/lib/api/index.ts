@@ -105,9 +105,18 @@ export type CompanyIntegrationUpsertInput = {
 };
 
 export type CompanyIntegrationExecutionAttempt = {
+  haProcuracaoEncontrada: boolean;
   message: string;
   observacoes?: string | null | undefined;
+  quantidadeRegistrosRetornados: number;
   success: boolean;
+};
+
+export type CompanyIntegrationExecutionCompanyUpdate = {
+  observacoesOperacionais: string | null;
+  statusProcuracao: StatusProcuracaoEmpresa;
+  ultimaConferenciaOperacionalEm: string | null;
+  updatedAt: string;
 };
 
 export type CompanyIntegrationExecutionInput = {
@@ -118,6 +127,7 @@ export type CompanyIntegrationExecutionInput = {
 };
 
 export type CompanyIntegrationExecutionResponse = {
+  company: CompanyIntegrationExecutionCompanyUpdate | null;
   execution: CompanyIntegrationExecutionAttempt;
   integration: CompanyIntegration;
 };
