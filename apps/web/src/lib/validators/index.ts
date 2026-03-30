@@ -10,7 +10,9 @@ type ResponsavelFormInput = {
 
 type CompanyFormInput = {
   cnpj: string;
+  ultimaConferenciaAcessoEm?: string;
   ultimaConferenciaOperacionalEm?: string;
+  ultimaConferenciaProcuracaoEm?: string;
   razaoSocial: string;
   responsavelInternoId: string;
 };
@@ -89,6 +91,16 @@ export function validateCompanyForm(
     return 'Selecione um responsavel existente.';
   }
 
+  const ultimaConferenciaAcessoEm =
+    form.ultimaConferenciaAcessoEm?.trim();
+
+  if (
+    ultimaConferenciaAcessoEm &&
+    Number.isNaN(new Date(ultimaConferenciaAcessoEm).getTime())
+  ) {
+    return 'Informe uma data de conferencia de acesso valida.';
+  }
+
   const ultimaConferenciaOperacionalEm =
     form.ultimaConferenciaOperacionalEm?.trim();
 
@@ -97,6 +109,16 @@ export function validateCompanyForm(
     Number.isNaN(new Date(ultimaConferenciaOperacionalEm).getTime())
   ) {
     return 'Informe uma data de conferencia valida.';
+  }
+
+  const ultimaConferenciaProcuracaoEm =
+    form.ultimaConferenciaProcuracaoEm?.trim();
+
+  if (
+    ultimaConferenciaProcuracaoEm &&
+    Number.isNaN(new Date(ultimaConferenciaProcuracaoEm).getTime())
+  ) {
+    return 'Informe uma data de conferencia de procuracao valida.';
   }
 
   return null;
