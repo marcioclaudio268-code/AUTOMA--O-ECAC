@@ -11,6 +11,7 @@ import {
   updateCompany,
   type CompanyCreateInput,
   type CompanyDetailItem,
+  type CompanyUpdateInput,
   type RegimeTributario,
   type ResponsavelInternoRecord,
   type StatusAcessoEmpresa,
@@ -45,6 +46,13 @@ type CompanyFormState = {
   statusAcesso: StatusAcessoEmpresa;
   statusProcuracao: StatusProcuracaoEmpresa;
 };
+
+type OperationalQuickAction =
+  | 'registrarConferencia'
+  | 'marcarAcessoDisponivel'
+  | 'marcarProcuracaoValida'
+  | 'regularizarPendenciaOperacional'
+  | 'reabrirPendenciaOperacional';
 
 const initialFormState: CompanyFormState = {
   cnpj: '',
@@ -116,6 +124,15 @@ function formatResponsavelOption(responsavel: ResponsavelInternoRecord) {
   }`;
 }
 
+function formatOperationalDate(value: string | null | undefined) {
+  return value ? formatDateTime(value) : 'Nao registrada';
+}
+
+function formatOperationalText(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : 'Sem observacoes.';
+}
+
 export default function CompanyDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -128,6 +145,8 @@ export default function CompanyDetailPage() {
   const [form, setForm] = useState<CompanyFormState>(initialFormState);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [activeQuickAction, setActiveQuickAction] =
+    useState<OperationalQuickAction | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -224,6 +243,44 @@ export default function CompanyDetailPage() {
     }
   }
 
+  async function persistCompanyUpdate(
+    payload: CompanyUpdateInput,
+    successMessage: string,
+    quickAction: OperationalQuickAction | null = null
+  ) {
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
+    setIsSaving(true);
+    setActiveQuickAction(quickAction);
+    setError('');
+    setMessage('');
+    setFlashMessage('');
+
+    try {
+      if (!companyId) {
+        throw new Error('Empresa invalida.');
+      }
+
+      const updated = await updateCompany(companyId, payload);
+      setCompany(updated);
+      setForm(toFormState(updated));
+      setMessage(successMessage);
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Falha ao atualizar empresa.'
+      );
+    } finally {
+      submitLockRef.current = false;
+      setIsSaving(false);
+      setActiveQuickAction(null);
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
@@ -240,28 +297,64 @@ export default function CompanyDetailPage() {
       return;
     }
 
-    submitLockRef.current = true;
     setFlashMessage('');
-    setIsSaving(true);
+    await persistCompanyUpdate(
+      buildPayload(form),
+      'Empresa atualizada com sucesso.'
+    );
+  }
 
-    try {
-      if (!companyId) {
-        throw new Error('Empresa invalida.');
-      }
+  async function handleQuickAction(action: OperationalQuickAction) {
+    const now = new Date().toISOString();
 
-      const updated = await updateCompany(companyId, buildPayload(form));
-      setCompany(updated);
-      setForm(toFormState(updated));
-      setMessage('Empresa atualizada com sucesso.');
-    } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : 'Falha ao atualizar empresa.'
-      );
-    } finally {
-      submitLockRef.current = false;
-      setIsSaving(false);
+    switch (action) {
+      case 'registrarConferencia':
+        await persistCompanyUpdate(
+          {
+            ultimaConferenciaOperacionalEm: now
+          },
+          'Conferencia operacional registrada agora.',
+          action
+        );
+        break;
+      case 'marcarAcessoDisponivel':
+        await persistCompanyUpdate(
+          {
+            statusAcesso: 'DISPONIVEL'
+          },
+          'Acesso marcado como disponivel.',
+          action
+        );
+        break;
+      case 'marcarProcuracaoValida':
+        await persistCompanyUpdate(
+          {
+            statusProcuracao: 'VALIDA'
+          },
+          'Procuracao marcada como valida.',
+          action
+        );
+        break;
+      case 'regularizarPendenciaOperacional':
+        await persistCompanyUpdate(
+          {
+            pendenciaOperacional: false,
+            regularizadaEm: now
+          },
+          'Pendencia operacional regularizada.',
+          action
+        );
+        break;
+      case 'reabrirPendenciaOperacional':
+        await persistCompanyUpdate(
+          {
+            pendenciaOperacional: true,
+            regularizadaEm: null
+          },
+          'Pendencia operacional reaberta.',
+          action
+        );
+        break;
     }
   }
 
@@ -308,6 +401,12 @@ export default function CompanyDetailPage() {
             >
               Carteira
             </Link>
+            <Link
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400"
+              href="/pendencias"
+            >
+              Pendencias
+            </Link>
             <button
               className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isSigningOut}
@@ -339,87 +438,167 @@ export default function CompanyDetailPage() {
 
         {company ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">
-                  Tratamento operacional manual
-                </p>
-                <h2 className="text-lg font-semibold text-slate-950">
-                  Tratar acesso, procuracao e pendencia operacional
-                </h2>
-                <p className="max-w-2xl text-sm leading-6 text-slate-600">
-                  Use a visualizacao abaixo para acompanhar o estado manual da
-                  empresa diretamente nesta tela.
-                </p>
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">
+                    Tratamento operacional manual
+                  </p>
+                  <h2 className="text-lg font-semibold text-slate-950">
+                    Tratar acesso, procuracao e pendencia operacional
+                  </h2>
+                  <p className="max-w-2xl text-sm leading-6 text-slate-600">
+                    Use os atalhos abaixo para registrar a acao manual e salvar
+                    o estado operacional diretamente nesta empresa.
+                  </p>
+                </div>
+
+                <dl className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Status de acesso
+                    </dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">
+                      {STATUS_ACESSO_LABELS[company.statusAcesso]}
+                    </dd>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Status de procuracao
+                    </dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">
+                      {STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
+                    </dd>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Pendencia operacional
+                    </dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">
+                      {company.pendenciaOperacional ? 'Sim' : 'Nao'}
+                    </dd>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Ultima conferencia de acesso
+                    </dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">
+                      {formatDateTime(company.ultimaConferenciaAcessoEm)}
+                    </dd>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Ultima conferencia de procuracao
+                    </dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">
+                      {formatDateTime(company.ultimaConferenciaProcuracaoEm)}
+                    </dd>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Ultima conferencia operacional
+                    </dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">
+                      {formatDateTime(company.ultimaConferenciaOperacionalEm)}
+                    </dd>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Regularizada em
+                    </dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">
+                      {formatDateTime(company.regularizadaEm)}
+                    </dd>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Observacoes operacionais
+                    </dt>
+                    <dd className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-900">
+                      {company.observacoesOperacionais?.trim() ||
+                        'Sem observacoes.'}
+                    </dd>
+                  </div>
+                </dl>
               </div>
 
-              <dl className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Status de acesso
-                  </dt>
-                  <dd className="mt-1 text-sm font-medium text-slate-900">
-                    {STATUS_ACESSO_LABELS[company.statusAcesso]}
-                  </dd>
+              <div className="space-y-3 xl:w-96">
+                <p className="text-sm font-medium text-slate-900">
+                  Acoes rapidas
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                  <button
+                    className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() => void handleQuickAction('registrarConferencia')}
+                    type="button"
+                  >
+                    {activeQuickAction === 'registrarConferencia'
+                      ? 'Registrando...'
+                      : 'Registrar conferencia agora'}
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() =>
+                      void handleQuickAction('marcarAcessoDisponivel')
+                    }
+                    type="button"
+                  >
+                    {activeQuickAction === 'marcarAcessoDisponivel'
+                      ? 'Aplicando...'
+                      : 'Marcar acesso como disponivel'}
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() =>
+                      void handleQuickAction('marcarProcuracaoValida')
+                    }
+                    type="button"
+                  >
+                    {activeQuickAction === 'marcarProcuracaoValida'
+                      ? 'Aplicando...'
+                      : 'Marcar procuracao como valida'}
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() =>
+                      void handleQuickAction(
+                        'regularizarPendenciaOperacional'
+                      )
+                    }
+                    type="button"
+                  >
+                    {activeQuickAction === 'regularizarPendenciaOperacional'
+                      ? 'Aplicando...'
+                      : 'Marcar pendencia operacional como regularizada'}
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() =>
+                      void handleQuickAction('reabrirPendenciaOperacional')
+                    }
+                    type="button"
+                  >
+                    {activeQuickAction === 'reabrirPendenciaOperacional'
+                      ? 'Aplicando...'
+                      : 'Reabrir pendencia operacional'}
+                  </button>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Status de procuracao
-                  </dt>
-                  <dd className="mt-1 text-sm font-medium text-slate-900">
-                    {STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
-                  </dd>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Pendencia operacional
-                  </dt>
-                  <dd className="mt-1 text-sm font-medium text-slate-900">
-                    {company.pendenciaOperacional ? 'Sim' : 'Nao'}
-                  </dd>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Ultima conferencia de acesso
-                  </dt>
-                  <dd className="mt-1 text-sm font-medium text-slate-900">
-                    {formatDateTime(company.ultimaConferenciaAcessoEm)}
-                  </dd>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Ultima conferencia de procuracao
-                  </dt>
-                  <dd className="mt-1 text-sm font-medium text-slate-900">
-                    {formatDateTime(company.ultimaConferenciaProcuracaoEm)}
-                  </dd>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Ultima conferencia operacional
-                  </dt>
-                  <dd className="mt-1 text-sm font-medium text-slate-900">
-                    {formatDateTime(company.ultimaConferenciaOperacionalEm)}
-                  </dd>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Regularizada em
-                  </dt>
-                  <dd className="mt-1 text-sm font-medium text-slate-900">
-                    {formatDateTime(company.regularizadaEm)}
-                  </dd>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Observacoes operacionais
-                  </dt>
-                  <dd className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-900">
-                    {company.observacoesOperacionais?.trim() ||
-                      'Sem observacoes.'}
-                  </dd>
-                </div>
-              </dl>
+                <Link
+                  className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400"
+                  href={`/pendencias?empresaId=${company.id}`}
+                >
+                  Ver pendencias desta empresa
+                </Link>
+                <p className="text-xs leading-5 text-slate-500">
+                  As acoes salvam imediatamente no registro da empresa e
+                  atualizam o painel de pendencias na proxima consulta.
+                </p>
+              </div>
             </div>
           </section>
         ) : null}
@@ -560,6 +739,29 @@ export default function CompanyDetailPage() {
                 <p className="whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                   {company.observacoesOperacionais?.trim() || '-'}
                 </p>
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-slate-900">
+                  Integracoes
+                </h3>
+                {company.integracoes.length === 0 ? (
+                  <p className="text-sm text-slate-600">
+                    Sem integracoes registradas.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {company.integracoes.map((integration) => (
+                      <li
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700"
+                        key={integration.id}
+                      >
+                        {integration.tipoIntegracao} -{' '}
+                        {integration.statusIntegracao}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
 
             </section>
