@@ -7,7 +7,9 @@ import {
 import {
   Prisma,
   StatusAcessoEmpresa,
-  StatusProcuracaoEmpresa
+  StatusIntegracao,
+  StatusProcuracaoEmpresa,
+  TipoIntegracao
 } from '@prisma/client';
 
 import { isBasicCnpj, normalizeCnpj } from '../../common/utils/cnpj';
@@ -29,11 +31,6 @@ const listInclude = {
 } as const;
 
 const detailInclude = {
-  integracoes: {
-    orderBy: {
-      createdAt: 'desc'
-    }
-  },
   responsavelInterno: {
     include: {
       usuarioInterno: {
@@ -48,6 +45,33 @@ const detailInclude = {
     }
   }
 } as const;
+
+type CompanyDetailIntegrationRow = {
+  createdAt: Date;
+  empresaId: string;
+  id: string;
+  mensagemErroAtual: string | null;
+  observacoes: string | null;
+  statusIntegracao: string;
+  tipoIntegracao: string;
+  updatedAt: Date;
+  ultimoErroEm: Date | null;
+  ultimoSucessoEm: Date | null;
+};
+
+type CompanyDetailIntegration = Omit<
+  CompanyDetailIntegrationRow,
+  'statusIntegracao' | 'tipoIntegracao'
+> & {
+  statusIntegracao: StatusIntegracao;
+  tipoIntegracao: TipoIntegracao;
+};
+
+type CompanyDetail = Prisma.EmpresaGetPayload<{
+  include: typeof detailInclude;
+}> & {
+  integracoes: CompanyDetailIntegration[];
+};
 
 @Injectable()
 export class CompaniesService {
@@ -93,10 +117,15 @@ export class CompaniesService {
       };
     }
 
-    return this.prisma.empresa.create({
+    const company = await this.prisma.empresa.create({
       data,
       include: detailInclude
     });
+
+    return {
+      ...company,
+      integracoes: await this.loadCompanyIntegracoes(company.id)
+    };
   }
 
   async findAll(query: ListCompaniesQueryDto = {}) {
@@ -132,12 +161,7 @@ export class CompaniesService {
   }
 
   async findOne(id: string) {
-    const company = await this.prisma.empresa.findUnique({
-      include: detailInclude,
-      where: {
-        id
-      }
-    });
+    const company = await this.loadCompanyDetail(id);
 
     if (!company) {
       throw new NotFoundException('Empresa nao encontrada.');
@@ -249,13 +273,18 @@ export class CompaniesService {
       throw new BadRequestException('Informe ao menos um campo para atualizar.');
     }
 
-    return this.prisma.empresa.update({
+    const company = await this.prisma.empresa.update({
       data,
       include: detailInclude,
       where: {
         id
       }
     });
+
+    return {
+      ...company,
+      integracoes: await this.loadCompanyIntegracoes(id)
+    };
   }
 
   private parseAndValidateCnpj(value: unknown): string {
@@ -293,6 +322,83 @@ export class CompaniesService {
     }
 
     return date;
+  }
+
+  private async loadCompanyDetail(id: string): Promise<CompanyDetail | null> {
+    const company = await this.prisma.empresa.findUnique({
+      include: detailInclude,
+      where: {
+        id
+      }
+    });
+
+    if (!company) {
+      return null;
+    }
+
+    return {
+      ...company,
+      integracoes: await this.loadCompanyIntegracoes(id)
+    };
+  }
+
+  private async loadCompanyIntegracoes(
+    empresaId: string
+  ): Promise<CompanyDetailIntegration[]> {
+    // Read integrations as text so legacy enum labels from older rows do not
+    // break the company detail payload.
+    const integracoes = await this.prisma.$queryRaw<
+      CompanyDetailIntegrationRow[]
+    >(Prisma.sql`
+      SELECT
+        "createdAt",
+        "empresaId",
+        "id",
+        "mensagemErroAtual",
+        "observacoes",
+        "statusIntegracao"::text AS "statusIntegracao",
+        "tipoIntegracao"::text AS "tipoIntegracao",
+        "updatedAt",
+        "ultimoErroEm",
+        "ultimoSucessoEm"
+      FROM "IntegracaoEmpresa"
+      WHERE "empresaId" = ${empresaId}
+      ORDER BY "createdAt" DESC
+    `);
+
+    return integracoes.map((integracao) => ({
+      ...integracao,
+      statusIntegracao: this.normalizeStatusIntegracao(
+        integracao.statusIntegracao
+      ),
+      tipoIntegracao: this.normalizeTipoIntegracao(integracao.tipoIntegracao)
+    }));
+  }
+
+  private normalizeStatusIntegracao(value: string): StatusIntegracao {
+    return this.normalizeEnumValue(
+      StatusIntegracao,
+      value,
+      StatusIntegracao.NAO_CONFIGURADA
+    );
+  }
+
+  private normalizeTipoIntegracao(value: string): TipoIntegracao {
+    return this.normalizeEnumValue(
+      TipoIntegracao,
+      value,
+      TipoIntegracao.MANUAL
+    );
+  }
+
+  private normalizeEnumValue<T extends Record<string, string>>(
+    enumObject: T,
+    value: string,
+    fallback: T[keyof T]
+  ): T[keyof T] {
+    return Object.values(enumObject).includes(value as T[keyof T])
+      ? (value as T[keyof T])
+      : fallback;
   }
 
   private async assertCompanyExists(id: string): Promise<void> {
