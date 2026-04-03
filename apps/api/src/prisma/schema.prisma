@@ -31,6 +31,7 @@ enum TipoIntegracao {
   MANUAL
   API
   RPA
+  INTEGRA_CONTADOR
 }
 
 enum StatusIntegracao {
@@ -113,4 +114,5 @@ model IntegracaoEmpresa {
   updatedAt         DateTime        @updatedAt
 
   @@index([empresaId])
+  @@unique([empresaId, tipoIntegracao])
 }

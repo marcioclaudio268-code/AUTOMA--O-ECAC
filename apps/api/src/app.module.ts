@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CompaniesModule } from './modules/companies/companies.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { CompetenciasModule } from './modules/competencias/competencias.module';
 import { DividaAtivaModule } from './modules/divida-ativa/divida-ativa.module';
 import { EvidenciasModule } from './modules/evidencias/evidencias.module';
@@ -22,6 +23,7 @@ const featureModules = [
   AuthModule,
   UsersModule,
   CompaniesModule,
+  DashboardModule,
   ResponsaveisModule,
   IntegrationsModule,
   ScansModule,

@@ -38,6 +38,39 @@ const initialFilters: CarteiraFilterState = {
   pendenciaOperacional: ''
 };
 
+function isStatusAcessoEmpresa(
+  value: string | null
+): value is StatusAcessoEmpresa {
+  return STATUS_ACESSO_OPTIONS.some((option) => option.value === value);
+}
+
+function isStatusProcuracaoEmpresa(
+  value: string | null
+): value is StatusProcuracaoEmpresa {
+  return STATUS_PROCURACAO_OPTIONS.some((option) => option.value === value);
+}
+
+function parseFiltersFromSearch(search: string): CarteiraFilterState {
+  const params = new URLSearchParams(search);
+  const statusAcesso = params.get('statusAcesso');
+  const statusProcuracao = params.get('statusProcuracao');
+  const pendenciaOperacional = params.get('pendenciaOperacional');
+
+  return {
+    responsavelInternoId: params.get('responsavelInternoId')?.trim() || '',
+    statusAcesso: isStatusAcessoEmpresa(statusAcesso)
+      ? statusAcesso
+      : '',
+    statusProcuracao: isStatusProcuracaoEmpresa(statusProcuracao)
+      ? statusProcuracao
+      : '',
+    pendenciaOperacional:
+      pendenciaOperacional === 'true' || pendenciaOperacional === 'false'
+        ? (pendenciaOperacional as '' | 'true' | 'false')
+        : ''
+  };
+}
+
 function buildQueryFilters(filters: CarteiraFilterState) {
   return {
     responsavelInternoId: filters.responsavelInternoId.trim() || undefined,
@@ -140,8 +173,10 @@ export default function CarteiraPage() {
       try {
         await requireSession();
 
+        const queryFilters = parseFiltersFromSearch(window.location.search);
+
         const [carteiraItems, responsaveisItems] = await Promise.all([
-          listCarteira(),
+          listCarteira(buildQueryFilters(queryFilters)),
           listResponsaveis()
         ]);
 
@@ -149,6 +184,7 @@ export default function CarteiraPage() {
           return;
         }
 
+        setFilters(queryFilters);
         setCarteira(carteiraItems);
         setResponsaveis(responsaveisItems);
       } catch (loadError) {
@@ -228,6 +264,7 @@ export default function CarteiraPage() {
 
   async function handleClearFilters() {
     setFilters(initialFilters);
+    router.replace('/carteira');
     await refreshCarteira(initialFilters);
   }
 
@@ -339,6 +376,18 @@ export default function CarteiraPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
+            <Link
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400"
+              href="/dashboard"
+            >
+              Dashboard
+            </Link>
+            <Link
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400"
+              href="/pendencias"
+            >
+              Pendencias
+            </Link>
             <Link
               className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400"
               href="/empresas"

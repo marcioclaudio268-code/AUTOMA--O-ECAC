@@ -110,6 +110,12 @@ export default function ResponsaveisPage() {
           <div className="flex flex-wrap gap-3">
             <Link
               className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400"
+              href="/dashboard"
+            >
+              Dashboard
+            </Link>
+            <Link
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400"
               href="/responsaveis/nova"
             >
               Novo responsavel
@@ -119,6 +125,12 @@ export default function ResponsaveisPage() {
               href="/carteira"
             >
               Carteira
+            </Link>
+            <Link
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400"
+              href="/pendencias"
+            >
+              Pendencias
             </Link>
             <Link
               className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400"

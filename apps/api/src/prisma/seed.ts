@@ -11,11 +11,14 @@ import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
-async function upsertManualIntegration(empresaId: string, observacoes: string) {
+async function upsertPriorityIntegration(
+  empresaId: string,
+  observacoes: string
+) {
   const existing = await prisma.integracaoEmpresa.findFirst({
     where: {
       empresaId,
-      tipoIntegracao: TipoIntegracao.MANUAL
+      tipoIntegracao: TipoIntegracao.INTEGRA_CONTADOR
     }
   });
 
@@ -40,7 +43,7 @@ async function upsertManualIntegration(empresaId: string, observacoes: string) {
       mensagemErroAtual: null,
       observacoes,
       statusIntegracao: StatusIntegracao.ATIVA,
-      tipoIntegracao: TipoIntegracao.MANUAL,
+      tipoIntegracao: TipoIntegracao.INTEGRA_CONTADOR,
       ultimoErroEm: null,
       ultimoSucessoEm: new Date()
     }
@@ -140,14 +143,14 @@ async function main() {
     }
   });
 
-  await upsertManualIntegration(
+  await upsertPriorityIntegration(
     empresa1.id,
-    'Integracao manual inicial da carteira.'
+    'Integracao contador inicial da carteira.'
   );
 
-  await upsertManualIntegration(
+  await upsertPriorityIntegration(
     empresa2.id,
-    'Integracao manual inicial da carteira.'
+    'Integracao contador inicial da carteira.'
   );
 
   console.log('Seed concluido.');

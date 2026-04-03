@@ -21,7 +21,7 @@ export default function LoginPage() {
         await requireSession();
 
         if (active) {
-          router.replace('/empresas');
+          router.replace('/dashboard');
         }
       } catch {
         if (active) {
@@ -44,7 +44,7 @@ export default function LoginPage() {
 
     try {
       await signIn(email, senha);
-      router.replace('/empresas');
+      router.replace('/dashboard');
     } catch (submitError) {
       setError(
         submitError instanceof Error ? submitError.message : 'Falha no login.'
@@ -67,13 +67,13 @@ export default function LoginPage() {
       <section className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
         <div className="space-y-2">
           <p className="text-sm font-medium uppercase tracking-[0.24em] text-slate-500">
-            ECAC AUTOMAÇÃO
+            ECAC AUTOMACAO
           </p>
           <h1 className="text-2xl font-semibold text-slate-900">
             Acesso interno
           </h1>
           <p className="text-sm leading-6 text-slate-600">
-            Entre com a conta interna para seguir para a area de empresas.
+            Entre com a conta interna para acessar o dashboard operacional.
           </p>
         </div>
 

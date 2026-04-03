@@ -16,7 +16,7 @@ export default function HomePage() {
         await requireSession();
 
         if (active) {
-          router.replace('/empresas');
+          router.replace('/dashboard');
         }
       } catch {
         if (active) {

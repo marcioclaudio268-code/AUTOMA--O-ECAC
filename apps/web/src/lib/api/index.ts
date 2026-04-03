@@ -18,7 +18,7 @@ export type StatusProcuracaoEmpresa =
   | 'PENDENTE'
   | 'NAO_VERIFICADA';
 
-export type TipoIntegracao = 'MANUAL' | 'API' | 'RPA';
+export type TipoIntegracao = 'MANUAL' | 'API' | 'RPA' | 'INTEGRA_CONTADOR';
 
 export type StatusIntegracao =
   | 'ATIVA'
@@ -96,6 +96,42 @@ export type CompanyIntegration = {
   ultimoSucessoEm: string | null;
 };
 
+export type CompanyIntegrationUpsertInput = {
+  mensagemErroAtual?: string | null | undefined;
+  observacoes?: string | null | undefined;
+  statusIntegracao?: StatusIntegracao | undefined;
+  ultimoErroEm?: string | null | undefined;
+  ultimoSucessoEm?: string | null | undefined;
+};
+
+export type CompanyIntegrationExecutionAttempt = {
+  haProcuracaoEncontrada: boolean;
+  message: string;
+  observacoes?: string | null | undefined;
+  quantidadeRegistrosRetornados: number;
+  success: boolean;
+};
+
+export type CompanyIntegrationExecutionCompanyUpdate = {
+  observacoesOperacionais: string | null;
+  statusProcuracao: StatusProcuracaoEmpresa;
+  ultimaConferenciaOperacionalEm: string | null;
+  updatedAt: string;
+};
+
+export type CompanyIntegrationExecutionInput = {
+  outorgado: string;
+  outorgante: string;
+  tipoOutorgado?: 'CPF' | 'CNPJ' | undefined;
+  tipoOutorgante?: 'CPF' | 'CNPJ' | undefined;
+};
+
+export type CompanyIntegrationExecutionResponse = {
+  company: CompanyIntegrationExecutionCompanyUpdate | null;
+  execution: CompanyIntegrationExecutionAttempt;
+  integration: CompanyIntegration;
+};
+
 export type CompanyDetailItem = CompanyBase & {
   integracoes: CompanyIntegration[];
   responsavelInterno: ResponsavelInternoDetail | null;
@@ -141,6 +177,51 @@ export type ResponsavelInternoRecord = {
     nome: string;
     perfil: PerfilUsuario;
   };
+};
+
+export type DashboardResponsavelResumo = {
+  quantidadeEmpresas: number;
+  responsavelInternoEmail: string | null;
+  responsavelInternoId: string | null;
+  responsavelInternoNome: string;
+};
+
+export type DashboardSummary = {
+  distribuicaoPorResponsavel: DashboardResponsavelResumo[];
+  indicadores: {
+    totalEmpresasNaCarteira: number;
+    totalEmpresasComAcessoPendenteOuBloqueado: number;
+    totalEmpresasComPendenciaOperacional: number;
+    totalEmpresasComProcuracaoPendente: number;
+  };
+};
+
+export type PendenciaTipo = 'ACESSO' | 'OPERACIONAL' | 'PROCURACAO';
+
+export type PendenciaStatusAtual =
+  | StatusAcessoEmpresa
+  | StatusProcuracaoEmpresa
+  | 'PENDENTE';
+
+export type PendenciaListItem = {
+  empresaCnpj: string;
+  empresaId: string;
+  empresaNome: string;
+  empresaNomeFantasia: string | null;
+  linkTratamento: string;
+  motivo: string;
+  observacaoOperacional: string | null;
+  responsavelInternoId: string | null;
+  responsavelInternoNome: string;
+  statusAtual: PendenciaStatusAtual;
+  tipoPendencia: PendenciaTipo;
+  ultimaConferenciaOperacionalEm: string | null;
+};
+
+export type PendenciasListFilters = {
+  empresaId?: string | undefined;
+  responsavelInternoId?: string | undefined;
+  tipoPendencia?: PendenciaTipo | undefined;
 };
 
 export type ResponsavelInternoCreateInput = {
@@ -313,6 +394,51 @@ export async function getCompany(id: string): Promise<CompanyDetailItem> {
   return apiRequest<CompanyDetailItem>(`/companies/${id}`);
 }
 
+export async function listCompanyIntegrations(
+  companyId: string
+): Promise<CompanyIntegration[]> {
+  return apiRequest<CompanyIntegration[]>(`/companies/${companyId}/integrations`);
+}
+
+export async function getCompanyIntegration(
+  companyId: string,
+  tipoIntegracao: TipoIntegracao
+): Promise<CompanyIntegration> {
+  return apiRequest<CompanyIntegration>(
+    `/companies/${companyId}/integrations/${encodeURIComponent(tipoIntegracao)}`
+  );
+}
+
+export async function upsertCompanyIntegration(
+  companyId: string,
+  tipoIntegracao: TipoIntegracao,
+  payload: CompanyIntegrationUpsertInput
+): Promise<CompanyIntegration> {
+  return apiRequest<CompanyIntegration>(
+    `/companies/${companyId}/integrations/${encodeURIComponent(tipoIntegracao)}`,
+    {
+      body: payload,
+      method: 'PATCH'
+    }
+  );
+}
+
+export async function executeCompanyIntegration(
+  companyId: string,
+  tipoIntegracao: TipoIntegracao,
+  payload: CompanyIntegrationExecutionInput
+): Promise<CompanyIntegrationExecutionResponse> {
+  return apiRequest<CompanyIntegrationExecutionResponse>(
+    `/companies/${companyId}/integrations/${encodeURIComponent(
+      tipoIntegracao
+    )}/execute`,
+    {
+      body: payload,
+      method: 'POST'
+    }
+  );
+}
+
 export async function createCompany(
   payload: CompanyCreateInput
 ): Promise<CompanyDetailItem> {
@@ -359,4 +485,28 @@ export async function updateResponsavel(
     body: payload,
     method: 'PATCH'
   });
+}
+
+export async function getDashboardSummary(): Promise<DashboardSummary> {
+  return apiRequest<DashboardSummary>('/dashboard/summary');
+}
+
+export async function listPendencias(
+  filters: PendenciasListFilters = {}
+): Promise<PendenciaListItem[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'empresaId', filters.empresaId);
+  appendQueryParam(
+    params,
+    'responsavelInternoId',
+    filters.responsavelInternoId
+  );
+  appendQueryParam(params, 'tipoPendencia', filters.tipoPendencia);
+
+  const query = params.toString();
+
+  return apiRequest<PendenciaListItem[]>(
+    query ? `/pendencias?${query}` : '/pendencias'
+  );
 }
