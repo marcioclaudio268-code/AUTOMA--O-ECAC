@@ -26,6 +26,13 @@ export type StatusIntegracao =
   | 'ERRO'
   | 'NAO_CONFIGURADA';
 
+export type TipoPendencia = 'ACESSO' | 'PROCURACAO' | 'OPERACIONAL';
+
+export type PendenciaStatusAtual =
+  | StatusAcessoEmpresa
+  | StatusProcuracaoEmpresa
+  | 'PENDENTE';
+
 export type AuthUser = {
   email: string;
   id: string;
@@ -43,6 +50,41 @@ export type ResponsavelInternoSummary = {
   id: string;
   nome: string;
   usuarioInternoId: string;
+};
+
+export type DashboardResponsavelSummary = {
+  responsavelInternoId: string | null;
+  responsavelNome: string;
+  totalEmpresas: number;
+};
+
+export type DashboardSummaryResponse = {
+  totalEmpresasNaCarteira: number;
+  totalEmpresasComPendenciaOperacional: number;
+  totalEmpresasComAcessoPendenteOuBloqueado: number;
+  totalEmpresasComProcuracaoPendente: number;
+  distribuicaoPorResponsavel: DashboardResponsavelSummary[];
+};
+
+export type PendenciaListItem = {
+  empresaCnpj: string;
+  empresaId: string;
+  empresaNome: string;
+  empresaNomeFantasia: string | null;
+  linkTratamento: string;
+  motivo: string;
+  observacaoOperacional: string | null;
+  responsavelInternoId: string | null;
+  responsavelInternoNome: string;
+  statusAtual: PendenciaStatusAtual;
+  tipoPendencia: TipoPendencia;
+  ultimaConferenciaOperacionalEm: string | null;
+};
+
+export type PendenciaListFilters = {
+  empresaId?: string | undefined;
+  responsavelInternoId?: string | undefined;
+  tipoPendencia?: TipoPendencia | undefined;
 };
 
 export type ResponsavelInternoDetail = {
@@ -311,6 +353,30 @@ export async function listCarteira(
     ...filters,
     naCarteira: true
   });
+}
+
+export async function getDashboardSummary(): Promise<DashboardSummaryResponse> {
+  return apiRequest<DashboardSummaryResponse>('/dashboard/summary');
+}
+
+export async function listPendencias(
+  filters: PendenciaListFilters = {}
+): Promise<PendenciaListItem[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'empresaId', filters.empresaId);
+  appendQueryParam(
+    params,
+    'responsavelInternoId',
+    filters.responsavelInternoId
+  );
+  appendQueryParam(params, 'tipoPendencia', filters.tipoPendencia);
+
+  const query = params.toString();
+
+  return apiRequest<PendenciaListItem[]>(
+    query ? `/pendencias?${query}` : '/pendencias'
+  );
 }
 
 export async function getCompany(id: string): Promise<CompanyDetailItem> {
