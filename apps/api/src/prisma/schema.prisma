@@ -50,6 +50,11 @@ enum StatusExecucaoVarredura {
   FALHA
 }
 
+enum TipoEventoOperacional {
+  VARREDURA_RELEVANTE
+  MUDANCA_ESTADO
+}
+
 enum RegimeTributario {
   SIMPLES_NACIONAL
   LUCRO_PRESUMIDO
@@ -106,6 +111,7 @@ model Empresa {
   updatedAt               DateTime              @updatedAt
   integracoes             IntegracaoEmpresa[]
   varreduras              Varredura[]
+  eventosOperacionais     EventoOperacional[]
 
   @@index([responsavelInternoId])
   @@index([naCarteira])
@@ -139,8 +145,25 @@ model Varredura {
   resumoResultado String?                 @db.Text
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
+  eventoOperacional EventoOperacional?
 
   @@index([empresaId])
   @@index([tipoVarredura])
   @@index([statusExecucao])
+}
+
+model EventoOperacional {
+  id          String                   @id @default(cuid())
+  empresaId   String
+  empresa     Empresa                  @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  varreduraId String                   @unique
+  varredura   Varredura                @relation(fields: [varreduraId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  tipoEvento  TipoEventoOperacional
+  descricao   String                   @db.Text
+  metadata    Json?
+  createdAt   DateTime                 @default(now())
+
+  @@index([empresaId])
+  @@index([varreduraId])
+  @@index([tipoEvento])
 }

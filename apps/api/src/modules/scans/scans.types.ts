@@ -3,7 +3,6 @@ import { Prisma, StatusExecucaoVarredura, TipoVarredura } from '@prisma/client';
 export type ScanCompany = Prisma.EmpresaGetPayload<{
   select: {
     id: true;
-    observacoesOperacionais: true;
     pendenciaOperacional: true;
     statusAcesso: true;
     statusProcuracao: true;

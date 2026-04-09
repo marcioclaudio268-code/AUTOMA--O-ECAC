@@ -8,6 +8,7 @@ import { requireSession, signOut } from '@/lib/auth';
 import {
   executeManualScan,
   getCompany,
+  listEventosOperacionais,
   listResponsaveis,
   listVarreduras,
   updateCompany,
@@ -15,6 +16,7 @@ import {
   type CompanyIntegration,
   type CompanyDetailItem,
   type CompanyUpdateInput,
+  type EventoOperacionalRecord,
   type RegimeTributario,
   type ResponsavelInternoRecord,
   type StatusAcessoEmpresa,
@@ -154,6 +156,28 @@ function formatScanStatusLabel(value: VarreduraRecord['statusExecucao']) {
     case 'INICIADA':
     default:
       return 'Iniciada';
+  }
+}
+
+function formatEventTypeLabel(value: EventoOperacionalRecord['tipoEvento']) {
+  switch (value) {
+    case 'VARREDURA_RELEVANTE':
+      return 'Varredura com achado';
+    case 'MUDANCA_ESTADO':
+    default:
+      return 'Mudanca de estado';
+  }
+}
+
+function getEventTone(
+  value: EventoOperacionalRecord['tipoEvento']
+): StatusTone {
+  switch (value) {
+    case 'VARREDURA_RELEVANTE':
+      return 'danger';
+    case 'MUDANCA_ESTADO':
+    default:
+      return 'warning';
   }
 }
 
@@ -297,6 +321,9 @@ export default function CompanyDetailPage() {
     []
   );
   const [varreduras, setVarreduras] = useState<VarreduraRecord[]>([]);
+  const [eventosOperacionais, setEventosOperacionais] = useState<
+    EventoOperacionalRecord[]
+  >([]);
   const [form, setForm] = useState<CompanyFormState>(initialFormState);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -355,6 +382,18 @@ export default function CompanyDetailPage() {
           } catch {
             if (active) {
               setVarreduras([]);
+            }
+          }
+
+          try {
+            const events = await listEventosOperacionais(companyId);
+
+            if (active) {
+              setEventosOperacionais(events);
+            }
+          } catch {
+            if (active) {
+              setEventosOperacionais([]);
             }
           }
         } catch (responsaveisError) {
@@ -530,14 +569,24 @@ export default function CompanyDetailPage() {
       throw new Error('Empresa invalida.');
     }
 
-    const [updatedCompany, scans] = await Promise.all([
-      getCompany(companyId),
-      listVarreduras(companyId)
-    ]);
+    const updatedCompany = await getCompany(companyId);
 
     setCompany(updatedCompany);
     setForm(toFormState(updatedCompany));
-    setVarreduras(scans);
+
+    try {
+      const scans = await listVarreduras(companyId);
+      setVarreduras(scans);
+    } catch {
+      setVarreduras([]);
+    }
+
+    try {
+      const events = await listEventosOperacionais(companyId);
+      setEventosOperacionais(events);
+    } catch {
+      setEventosOperacionais([]);
+    }
   }
 
   async function handleManualScan() {
@@ -1130,6 +1179,57 @@ export default function CompanyDetailPage() {
                             </dd>
                           </div>
                         </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Eventos operacionais recentes
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Consequencias auditaveis das varreduras manuais da empresa.
+                    </p>
+                  </div>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    {eventosOperacionais.length} registro(s)
+                  </span>
+                </div>
+                {eventosOperacionais.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
+                    Nenhum evento operacional recente registrado.
+                  </p>
+                ) : (
+                  <ul className="space-y-3">
+                    {eventosOperacionais.map((event) => (
+                      <li
+                        className="rounded-2xl border border-slate-200 bg-white p-4"
+                        key={event.id}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold text-slate-900">
+                              {formatEventTypeLabel(event.tipoEvento)}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {formatDateTime(event.createdAt)}
+                            </p>
+                          </div>
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                              getEventTone(event.tipoEvento)
+                            )}`}
+                          >
+                            {formatEventTypeLabel(event.tipoEvento)}
+                          </span>
+                        </div>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                          {event.descricao}
+                        </p>
                       </li>
                     ))}
                   </ul>
