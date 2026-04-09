@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { CompetenciasModule } from './modules/competencias/competencias.module';
 import { DividaAtivaModule } from './modules/divida-ativa/divida-ativa.module';
@@ -20,6 +21,7 @@ import { UsersModule } from './modules/users/users.module';
 
 const featureModules = [
   AuthModule,
+  DashboardModule,
   UsersModule,
   CompaniesModule,
   ResponsaveisModule,
