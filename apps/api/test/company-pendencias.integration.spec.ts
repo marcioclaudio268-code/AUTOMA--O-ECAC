@@ -13,6 +13,7 @@ import { Module, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import {
+  CriticidadePendenciaOperacional,
   PerfilUsuario,
   PrismaClient,
   RegimeTributario,
@@ -156,6 +157,7 @@ describe('pendencias operacionais persistidas local', () => {
     expect(pendenciasResponse.response.status).toBe(200);
     const pendencias = pendenciasResponse.body as Array<{
       createdAt: string;
+      criticidade: string;
       descricao: string;
       id: string;
       origem: string | null;
@@ -189,6 +191,19 @@ describe('pendencias operacionais persistidas local', () => {
         pendencia.descricao.includes('Pendencia operacional manual')
       )
     ).toBe(true);
+    expect(
+      pendencias.find((pendencia) => pendencia.tipo === 'ACESSO')?.criticidade
+    ).toBe(CriticidadePendenciaOperacional.ALTA);
+    expect(
+      pendencias
+        .find((pendencia) => pendencia.tipo === 'PROCURACAO')
+        ?.criticidade
+    ).toBe(CriticidadePendenciaOperacional.MEDIA);
+    expect(
+      pendencias
+        .find((pendencia) => pendencia.tipo === 'OPERACIONAL')
+        ?.criticidade
+    ).toBe(CriticidadePendenciaOperacional.ALTA);
   }, TEST_TIMEOUT);
 
   test('nao duplica pendencia aberta em varredura repetida', async () => {
@@ -294,6 +309,57 @@ describe('pendencias operacionais persistidas local', () => {
       pendenciaOperacional: false
     });
     expect(empresa?.regularizadaEm).not.toBeNull();
+  }, TEST_TIMEOUT);
+
+  test('filtra pendencias por status e criticidade', async () => {
+    await requestJson(
+      `/companies/${seededData.empresaIrregularId}/scans/manual`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    const pendenciasAltaResponse = await requestJson(
+      `/companies/${seededData.empresaIrregularId}/pendencias?criticidade=ALTA`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(pendenciasAltaResponse.response.status).toBe(200);
+    expect(pendenciasAltaResponse.body).toHaveLength(2);
+    expect(
+      (pendenciasAltaResponse.body as Array<{ tipo: string }>).map(
+        (pendencia) => pendencia.tipo
+      )
+    ).toEqual(expect.arrayContaining(['ACESSO', 'OPERACIONAL']));
+
+    const pendenciasResolvidasResponse = await requestJson(
+      `/companies/${seededData.empresaIrregularId}/pendencias?status=RESOLVIDA`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(pendenciasResolvidasResponse.response.status).toBe(200);
+    expect(pendenciasResolvidasResponse.body).toHaveLength(1);
+    expect(
+      (pendenciasResolvidasResponse.body as Array<{ tipo: string }>)[0]?.tipo
+    ).toBe('OPERACIONAL');
+
+    const pendenciasMediaResponse = await requestJson(
+      `/companies/${seededData.empresaIrregularId}/pendencias?status=ABERTA&criticidade=MEDIA`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(pendenciasMediaResponse.response.status).toBe(200);
+    expect(pendenciasMediaResponse.body).toHaveLength(1);
+    expect(
+      (pendenciasMediaResponse.body as Array<{ tipo: string }>)[0]?.tipo
+    ).toBe('PROCURACAO');
   }, TEST_TIMEOUT);
 
   test('nao cria pendencia para empresa regular', async () => {
