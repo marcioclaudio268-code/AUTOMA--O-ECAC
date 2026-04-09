@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ecac-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ecac_automacao
+      POSTGRES_USER: ecac
+      POSTGRES_PASSWORD: ecac
+    ports:
+      - "5432:5432"
+    volumes:
+      - ecac_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecac -d ecac_automacao"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ecac_postgres_data:
