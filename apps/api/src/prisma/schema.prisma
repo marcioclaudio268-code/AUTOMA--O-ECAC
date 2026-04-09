@@ -40,6 +40,16 @@ enum StatusIntegracao {
   NAO_CONFIGURADA
 }
 
+enum TipoVarredura {
+  MANUAL
+}
+
+enum StatusExecucaoVarredura {
+  INICIADA
+  CONCLUIDA
+  FALHA
+}
+
 enum RegimeTributario {
   SIMPLES_NACIONAL
   LUCRO_PRESUMIDO
@@ -95,6 +105,7 @@ model Empresa {
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
   integracoes             IntegracaoEmpresa[]
+  varreduras              Varredura[]
 
   @@index([responsavelInternoId])
   @@index([naCarteira])
@@ -115,4 +126,21 @@ model IntegracaoEmpresa {
   updatedAt         DateTime        @updatedAt
 
   @@index([empresaId])
+}
+
+model Varredura {
+  id             String                   @id @default(cuid())
+  empresaId      String
+  empresa       Empresa                  @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  tipoVarredura  TipoVarredura
+  statusExecucao StatusExecucaoVarredura
+  iniciadoEm     DateTime
+  finalizadoEm   DateTime?
+  resumoResultado String?                 @db.Text
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  @@index([empresaId])
+  @@index([tipoVarredura])
+  @@index([statusExecucao])
 }
