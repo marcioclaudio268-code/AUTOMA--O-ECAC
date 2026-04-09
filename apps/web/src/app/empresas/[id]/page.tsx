@@ -9,14 +9,17 @@ import {
   executeManualScan,
   getCompany,
   listEventosOperacionais,
+  listCompanyPendencias,
   listResponsaveis,
   listVarreduras,
+  resolveCompanyPendencia,
   updateCompany,
   type CompanyCreateInput,
   type CompanyIntegration,
   type CompanyDetailItem,
   type CompanyUpdateInput,
   type EventoOperacionalRecord,
+  type PendenciaOperacionalRecord,
   type RegimeTributario,
   type ResponsavelInternoRecord,
   type StatusAcessoEmpresa,
@@ -181,6 +184,38 @@ function getEventTone(
   }
 }
 
+function formatPendenciaTypeLabel(
+  value: PendenciaOperacionalRecord['tipo']
+) {
+  switch (value) {
+    case 'ACESSO':
+      return 'Acesso';
+    case 'PROCURACAO':
+      return 'Procuracao';
+    case 'OPERACIONAL':
+    default:
+      return 'Operacional';
+  }
+}
+
+function formatPendenciaStatusLabel(
+  value: PendenciaOperacionalRecord['status']
+) {
+  switch (value) {
+    case 'RESOLVIDA':
+      return 'Resolvida';
+    case 'ABERTA':
+    default:
+      return 'Aberta';
+  }
+}
+
+function getPendenciaTone(
+  value: PendenciaOperacionalRecord['status']
+): StatusTone {
+  return value === 'RESOLVIDA' ? 'success' : 'danger';
+}
+
 function getScanTone(
   value: VarreduraRecord['statusExecucao']
 ): StatusTone {
@@ -235,7 +270,7 @@ function getProcuracaoTone(status: StatusProcuracaoEmpresa): StatusTone {
   return 'danger';
 }
 
-function getPendenciaTone(value: boolean): StatusTone {
+function getPendenciaFlagTone(value: boolean): StatusTone {
   return value ? 'danger' : 'success';
 }
 
@@ -324,9 +359,15 @@ export default function CompanyDetailPage() {
   const [eventosOperacionais, setEventosOperacionais] = useState<
     EventoOperacionalRecord[]
   >([]);
+  const [pendenciasOperacionais, setPendenciasOperacionais] = useState<
+    PendenciaOperacionalRecord[]
+  >([]);
   const [form, setForm] = useState<CompanyFormState>(initialFormState);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [resolvingPendenciaId, setResolvingPendenciaId] = useState<
+    string | null
+  >(null);
   const [activeQuickAction, setActiveQuickAction] =
     useState<OperationalQuickAction | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -394,6 +435,18 @@ export default function CompanyDetailPage() {
           } catch {
             if (active) {
               setEventosOperacionais([]);
+            }
+          }
+
+          try {
+            const pendencias = await listCompanyPendencias(companyId);
+
+            if (active) {
+              setPendenciasOperacionais(pendencias);
+            }
+          } catch {
+            if (active) {
+              setPendenciasOperacionais([]);
             }
           }
         } catch (responsaveisError) {
@@ -587,6 +640,13 @@ export default function CompanyDetailPage() {
     } catch {
       setEventosOperacionais([]);
     }
+
+    try {
+      const pendencias = await listCompanyPendencias(companyId);
+      setPendenciasOperacionais(pendencias);
+    } catch {
+      setPendenciasOperacionais([]);
+    }
   }
 
   async function handleManualScan() {
@@ -619,6 +679,39 @@ export default function CompanyDetailPage() {
       submitLockRef.current = false;
       setIsSaving(false);
       setActiveQuickAction(null);
+    }
+  }
+
+  async function handleResolvePendencia(pendenciaId: string) {
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
+    setIsSaving(true);
+    setResolvingPendenciaId(pendenciaId);
+    setError('');
+    setMessage('');
+    setFlashMessage('');
+
+    try {
+      if (!companyId) {
+        throw new Error('Empresa invalida.');
+      }
+
+      await resolveCompanyPendencia(companyId, pendenciaId);
+      await refreshOperationalData();
+      setMessage('Pendencia operacional resolvida.');
+    } catch (resolveError) {
+      setError(
+        resolveError instanceof Error
+          ? resolveError.message
+          : 'Falha ao resolver pendencia operacional.'
+      );
+    } finally {
+      submitLockRef.current = false;
+      setIsSaving(false);
+      setResolvingPendenciaId(null);
     }
   }
 
@@ -785,7 +878,7 @@ export default function CompanyDetailPage() {
                         ? 'A fila deve tratar'
                         : 'Sem pendencia aberta'
                     }
-                    tone={getPendenciaTone(company.pendenciaOperacional)}
+                    tone={getPendenciaFlagTone(company.pendenciaOperacional)}
                     value={company.pendenciaOperacional ? 'Aberta' : 'Fechada'}
                   />
                   <StatusCard
@@ -1232,6 +1325,85 @@ export default function CompanyDetailPage() {
                         </p>
                       </li>
                     ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Pendencias operacionais recentes
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Itens em acompanhamento que continuam abertos ou foram
+                      encerrados manualmente.
+                    </p>
+                  </div>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    {pendenciasOperacionais.length} registro(s)
+                  </span>
+                </div>
+                {pendenciasOperacionais.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
+                    Nenhuma pendencia operacional recente registrada.
+                  </p>
+                ) : (
+                  <ul className="space-y-3">
+                    {pendenciasOperacionais.map((pendencia) => {
+                      const isOpen = pendencia.status === 'ABERTA';
+                      const isResolving =
+                        resolvingPendenciaId === pendencia.id && isSaving;
+
+                      return (
+                        <li
+                          className="rounded-2xl border border-slate-200 bg-white p-4"
+                          key={pendencia.id}
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                              <p className="text-sm font-semibold text-slate-900">
+                                {formatPendenciaTypeLabel(pendencia.tipo)}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                Criada em {formatDateTime(pendencia.createdAt)}
+                              </p>
+                            </div>
+                            <span
+                              className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                getPendenciaTone(pendencia.status)
+                              )}`}
+                            >
+                              {formatPendenciaStatusLabel(pendencia.status)}
+                            </span>
+                          </div>
+                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                            {pendencia.descricao}
+                          </p>
+                          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                              {pendencia.resolvedAt
+                                ? `Resolvida em ${formatDateTime(pendencia.resolvedAt)}`
+                                : pendencia.origem || 'Origem manual'}
+                            </p>
+                            {isOpen ? (
+                              <button
+                                className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={isSaving}
+                                onClick={() =>
+                                  void handleResolvePendencia(pendencia.id)
+                                }
+                                type="button"
+                              >
+                                {isResolving
+                                  ? 'Resolvendo...'
+                                  : 'Marcar como resolvida'}
+                              </button>
+                            ) : null}
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>

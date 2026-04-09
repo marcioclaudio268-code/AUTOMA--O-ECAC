@@ -50,9 +50,20 @@ enum StatusExecucaoVarredura {
   FALHA
 }
 
+enum StatusPendenciaOperacional {
+  ABERTA
+  RESOLVIDA
+}
+
 enum TipoEventoOperacional {
   VARREDURA_RELEVANTE
   MUDANCA_ESTADO
+}
+
+enum TipoPendenciaOperacional {
+  ACESSO
+  OPERACIONAL
+  PROCURACAO
 }
 
 enum RegimeTributario {
@@ -110,6 +121,7 @@ model Empresa {
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
   integracoes             IntegracaoEmpresa[]
+  pendenciasOperacionais  PendenciaOperacional[]
   varreduras              Varredura[]
   eventosOperacionais     EventoOperacional[]
 
@@ -166,4 +178,21 @@ model EventoOperacional {
   @@index([empresaId])
   @@index([varreduraId])
   @@index([tipoEvento])
+}
+
+model PendenciaOperacional {
+  id         String                    @id @default(cuid())
+  empresaId  String
+  empresa    Empresa                   @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  tipo       TipoPendenciaOperacional
+  status     StatusPendenciaOperacional @default(ABERTA)
+  descricao  String                    @db.Text
+  origem     String?
+  resolvedAt DateTime?
+  createdAt  DateTime                  @default(now())
+
+  @@index([empresaId])
+  @@index([status])
+  @@index([tipo])
+  @@index([createdAt])
 }

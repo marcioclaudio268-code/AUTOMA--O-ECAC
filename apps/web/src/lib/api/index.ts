@@ -36,6 +36,8 @@ export type TipoEventoOperacional =
 
 export type TipoPendencia = 'ACESSO' | 'PROCURACAO' | 'OPERACIONAL';
 
+export type StatusPendenciaOperacional = 'ABERTA' | 'RESOLVIDA';
+
 export type PendenciaStatusAtual =
   | StatusAcessoEmpresa
   | StatusProcuracaoEmpresa
@@ -126,6 +128,21 @@ export type EventoOperacionalRecord = {
 };
 
 export type RecentEventosFilters = {
+  take?: number | undefined;
+};
+
+export type PendenciaOperacionalRecord = {
+  createdAt: string;
+  descricao: string;
+  empresaId: string;
+  id: string;
+  origem: string | null;
+  resolvedAt: string | null;
+  status: StatusPendenciaOperacional;
+  tipo: TipoPendencia;
+};
+
+export type RecentPendenciasFilters = {
   take?: number | undefined;
 };
 
@@ -461,6 +478,35 @@ export async function listEventosOperacionais(
     query
       ? `/companies/${companyId}/events/recent?${query}`
       : `/companies/${companyId}/events/recent`
+  );
+}
+
+export async function listCompanyPendencias(
+  companyId: string,
+  filters: RecentPendenciasFilters = {}
+): Promise<PendenciaOperacionalRecord[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'take', filters.take);
+
+  const query = params.toString();
+
+  return apiRequest<PendenciaOperacionalRecord[]>(
+    query
+      ? `/companies/${companyId}/pendencias?${query}`
+      : `/companies/${companyId}/pendencias`
+  );
+}
+
+export async function resolveCompanyPendencia(
+  companyId: string,
+  pendenciaId: string
+): Promise<PendenciaOperacionalRecord> {
+  return apiRequest<PendenciaOperacionalRecord>(
+    `/companies/${companyId}/pendencias/${pendenciaId}/resolver`,
+    {
+      method: 'PATCH'
+    }
   );
 }
 

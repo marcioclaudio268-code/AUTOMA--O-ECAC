@@ -8,13 +8,15 @@ import {
   buildOperationalSummary,
   deriveOperationalFindings
 } from '../events/operational-signals';
+import { PendenciasService } from '../pendencias/pendencias.service';
 import type { ManualScanExecutionResult, ScanCompany } from './scans.types';
 
 @Injectable()
 export class ScansService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly eventsService: EventsService
+    private readonly eventsService: EventsService,
+    private readonly pendenciasService: PendenciasService
   ) {}
 
   async executeManual(companyId: string): Promise<ManualScanExecutionResult> {
@@ -57,6 +59,11 @@ export class ScansService {
         resumoResultado,
         stateSnapshot,
         varreduraId: varredura.id
+      });
+
+      await this.pendenciasService.recordManualScanPendencias(tx, {
+        companyId,
+        findings
       });
 
       return {
