@@ -3,15 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true }); require('fs').rmSync('tsconfig.build.tsbuildinfo', { force: true });\" && nest start --watch",
+    "dev": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true }); require('fs').rmSync('tsconfig.build.tsbuildinfo', { force: true });\" && dotenv -e ../../.env.local -- nest start --watch",
     "build": "node -e \"require('fs').rmSync('tsconfig.build.tsbuildinfo', { force: true });\" && nest build",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "vitest run --passWithNoTests",
-    "prisma:generate": "dotenv -e ../../.env -- prisma generate --schema src/prisma/schema.prisma",
-    "db:migrate": "dotenv -e ../../.env -- prisma migrate deploy --schema src/prisma/schema.prisma",
-    "db:migrate:dev": "dotenv -e ../../.env -- prisma migrate dev --schema src/prisma/schema.prisma",
-    "db:status": "dotenv -e ../../.env -- prisma migrate status --schema src/prisma/schema.prisma",
-    "db:seed": "dotenv -e ../../.env -- tsx src/prisma/seed.ts"
+    "prisma:generate": "dotenv -e ../../.env.local -- prisma generate --schema src/prisma/schema.prisma",
+    "db:migrate": "dotenv -e ../../.env.local -- prisma migrate deploy --schema src/prisma/schema.prisma",
+    "db:migrate:dev": "dotenv -e ../../.env.local -- prisma migrate dev --schema src/prisma/schema.prisma",
+    "db:status": "dotenv -e ../../.env.local -- prisma migrate status --schema src/prisma/schema.prisma",
+    "db:seed": "dotenv -e ../../.env.local -- tsx src/prisma/seed.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.5",
