@@ -1,58 +1,68 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import {
-  StatusAcessoEmpresa,
-  StatusExecucaoVarredura,
-  StatusProcuracaoEmpresa,
-  TipoVarredura
-} from '@prisma/client';
+import { Prisma, StatusExecucaoVarredura, TipoVarredura } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { EventsService } from '../events/events.service';
+import {
+  buildOperationalStateSnapshot,
+  buildOperationalSummary,
+  deriveOperationalFindings
+} from '../events/operational-signals';
 import type { ManualScanExecutionResult, ScanCompany } from './scans.types';
-
-const ACCESS_NAO_REGULAR = new Set<StatusAcessoEmpresa>([
-  StatusAcessoEmpresa.BLOQUEADO,
-  StatusAcessoEmpresa.INDISPONIVEL,
-  StatusAcessoEmpresa.NAO_VERIFICADO
-]);
 
 @Injectable()
 export class ScansService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly eventsService: EventsService
+  ) {}
 
   async executeManual(companyId: string): Promise<ManualScanExecutionResult> {
-    const company = await this.findScanCompany(companyId);
+    return this.prisma.$transaction(async (tx) => {
+      const company = await this.findScanCompany(tx, companyId);
 
-    if (!company) {
-      throw new NotFoundException('Empresa nao encontrada.');
-    }
+      if (!company) {
+        throw new NotFoundException('Empresa nao encontrada.');
+      }
 
-    const startedAt = new Date();
-    const finishedAt = new Date();
-    const resumoResultado = this.buildResumoResultado(company);
+      const startedAt = new Date();
+      const finishedAt = new Date();
+      const stateSnapshot = buildOperationalStateSnapshot(company);
+      const findings = deriveOperationalFindings(company);
+      const resumoResultado = buildOperationalSummary(company);
 
-    const varredura = await this.prisma.varredura.create({
-      data: {
-        empresaId: companyId,
-        finalizadoEm: finishedAt,
-        iniciadoEm: startedAt,
+      const varredura = await tx.varredura.create({
+        data: {
+          empresaId: companyId,
+          finalizadoEm: finishedAt,
+          iniciadoEm: startedAt,
+          resumoResultado,
+          statusExecucao: StatusExecucaoVarredura.CONCLUIDA,
+          tipoVarredura: TipoVarredura.MANUAL
+        }
+      });
+
+      await tx.empresa.update({
+        data: {
+          ultimaVarreduraEm: finishedAt
+        },
+        where: {
+          id: companyId
+        }
+      });
+
+      await this.eventsService.recordManualScanOutcome(tx, {
+        companyId,
+        findings,
         resumoResultado,
-        statusExecucao: StatusExecucaoVarredura.CONCLUIDA,
-        tipoVarredura: TipoVarredura.MANUAL
-      }
-    });
+        stateSnapshot,
+        varreduraId: varredura.id
+      });
 
-    await this.prisma.empresa.update({
-      data: {
-        ultimaVarreduraEm: finishedAt
-      },
-      where: {
-        id: companyId
-      }
+      return {
+        varredura
+      };
     });
-
-    return {
-      varredura
-    };
   }
 
   async listRecent(companyId: string, take = 5) {
@@ -67,11 +77,13 @@ export class ScansService {
     });
   }
 
-  private async findScanCompany(companyId: string): Promise<ScanCompany | null> {
-    return this.prisma.empresa.findUnique({
+  private async findScanCompany(
+    client: Prisma.TransactionClient,
+    companyId: string
+  ): Promise<ScanCompany | null> {
+    return client.empresa.findUnique({
       select: {
         id: true,
-        observacoesOperacionais: true,
         pendenciaOperacional: true,
         statusAcesso: true,
         statusProcuracao: true
@@ -82,25 +94,4 @@ export class ScansService {
     });
   }
 
-  private buildResumoResultado(company: ScanCompany): string {
-    const insights: string[] = [];
-
-    if (ACCESS_NAO_REGULAR.has(company.statusAcesso)) {
-      insights.push('Acesso irregular');
-    }
-
-    if (company.statusProcuracao !== StatusProcuracaoEmpresa.VALIDA) {
-      insights.push('Procuracao irregular');
-    }
-
-    if (company.pendenciaOperacional) {
-      insights.push('Pendencia operacional manual');
-    }
-
-    if (insights.length === 0) {
-      return 'Nenhuma irregularidade encontrada.';
-    }
-
-    return insights.join(' | ');
-  }
 }

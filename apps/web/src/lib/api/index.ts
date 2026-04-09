@@ -30,6 +30,10 @@ export type TipoVarredura = 'MANUAL';
 
 export type StatusExecucaoVarredura = 'INICIADA' | 'CONCLUIDA' | 'FALHA';
 
+export type TipoEventoOperacional =
+  | 'VARREDURA_RELEVANTE'
+  | 'MUDANCA_ESTADO';
+
 export type TipoPendencia = 'ACESSO' | 'PROCURACAO' | 'OPERACIONAL';
 
 export type PendenciaStatusAtual =
@@ -108,6 +112,20 @@ export type ManualScanExecutionResponse = {
 };
 
 export type RecentScansFilters = {
+  take?: number | undefined;
+};
+
+export type EventoOperacionalRecord = {
+  createdAt: string;
+  descricao: string;
+  empresaId: string;
+  id: string;
+  metadata: Record<string, unknown> | null;
+  tipoEvento: TipoEventoOperacional;
+  varreduraId: string;
+};
+
+export type RecentEventosFilters = {
   take?: number | undefined;
 };
 
@@ -426,6 +444,23 @@ export async function listVarreduras(
 
   return apiRequest<VarreduraRecord[]>(
     query ? `/companies/${companyId}/scans/recent?${query}` : `/companies/${companyId}/scans/recent`
+  );
+}
+
+export async function listEventosOperacionais(
+  companyId: string,
+  filters: RecentEventosFilters = {}
+): Promise<EventoOperacionalRecord[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'take', filters.take);
+
+  const query = params.toString();
+
+  return apiRequest<EventoOperacionalRecord[]>(
+    query
+      ? `/companies/${companyId}/events/recent?${query}`
+      : `/companies/${companyId}/events/recent`
   );
 }
 
