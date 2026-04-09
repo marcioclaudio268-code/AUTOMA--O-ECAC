@@ -10,6 +10,7 @@ import {
   listResponsaveis,
   updateCompany,
   type CompanyCreateInput,
+  type CompanyIntegration,
   type CompanyDetailItem,
   type CompanyUpdateInput,
   type RegimeTributario,
@@ -131,6 +132,122 @@ function formatOperationalDate(value: string | null | undefined) {
 function formatOperationalText(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : 'Sem observacoes.';
+}
+
+type StatusTone = 'success' | 'warning' | 'danger' | 'neutral';
+
+function getStatusToneClasses(tone: StatusTone): string {
+  switch (tone) {
+    case 'success':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+    case 'warning':
+      return 'border-amber-200 bg-amber-50 text-amber-800';
+    case 'danger':
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+    case 'neutral':
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+  }
+}
+
+function getAccessTone(status: StatusAcessoEmpresa): StatusTone {
+  if (status === 'DISPONIVEL') {
+    return 'success';
+  }
+
+  if (status === 'NAO_VERIFICADO') {
+    return 'warning';
+  }
+
+  return 'danger';
+}
+
+function getProcuracaoTone(status: StatusProcuracaoEmpresa): StatusTone {
+  if (status === 'VALIDA') {
+    return 'success';
+  }
+
+  if (status === 'NAO_VERIFICADA') {
+    return 'warning';
+  }
+
+  return 'danger';
+}
+
+function getPendenciaTone(value: boolean): StatusTone {
+  return value ? 'danger' : 'success';
+}
+
+function getIntegrationTone(
+  status: CompanyIntegration['statusIntegracao']
+): StatusTone {
+  switch (status) {
+    case 'ATIVA':
+      return 'success';
+    case 'ERRO':
+      return 'danger';
+    case 'INATIVA':
+      return 'warning';
+    case 'NAO_CONFIGURADA':
+    default:
+      return 'neutral';
+  }
+}
+
+function describeOperationalAttention(company: CompanyDetailItem) {
+  const items: string[] = [];
+  let tone: StatusTone = 'success';
+
+  if (company.statusAcesso !== 'DISPONIVEL') {
+    items.push(`Acesso: ${STATUS_ACESSO_LABELS[company.statusAcesso]}`);
+    tone = company.statusAcesso === 'NAO_VERIFICADO' ? tone : 'danger';
+  }
+
+  if (company.statusProcuracao !== 'VALIDA') {
+    items.push(`Procuracao: ${STATUS_PROCURACAO_LABELS[company.statusProcuracao]}`);
+    tone = company.statusProcuracao === 'NAO_VERIFICADA' && tone !== 'danger'
+      ? 'warning'
+      : 'danger';
+  }
+
+  if (company.pendenciaOperacional) {
+    items.push('Pendencia operacional aberta');
+    tone = 'danger';
+  }
+
+  if (items.length === 0) {
+    return {
+      items,
+      tone: 'success' as const,
+      title: 'Estado operacional regular'
+    };
+  }
+
+  return {
+    items,
+    tone,
+    title: tone === 'danger' ? 'Tratamento requerido' : 'Acompanhar confirmacao'
+  };
+}
+
+function StatusCard({
+  label,
+  note,
+  tone,
+  value
+}: {
+  label: string;
+  note?: string;
+  tone: StatusTone;
+  value: string;
+}) {
+  return (
+    <div className={`rounded-xl border px-3 py-3 ${getStatusToneClasses(tone)}`}>
+      <p className="text-xs uppercase tracking-[0.18em] opacity-80">{label}</p>
+      <p className="mt-1 text-sm font-semibold">{value}</p>
+      {note ? <p className="mt-1 text-xs leading-5 opacity-90">{note}</p> : null}
+    </div>
+  );
 }
 
 export default function CompanyDetailPage() {
@@ -358,6 +475,8 @@ export default function CompanyDetailPage() {
     }
   }
 
+  const operationalAttention = company ? describeOperationalAttention(company) : null;
+
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center px-6">
@@ -438,95 +557,116 @@ export default function CompanyDetailPage() {
 
         {company ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-              <div className="space-y-4">
-                <div className="space-y-1">
+            <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+              <div className="space-y-5">
+                <div className="space-y-2">
                   <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">
-                    Tratamento operacional manual
+                    Centro operacional da empresa
                   </p>
-                  <h2 className="text-lg font-semibold text-slate-950">
+                  <h2 className="text-xl font-semibold text-slate-950">
                     Tratar acesso, procuracao e pendencia operacional
                   </h2>
                   <p className="max-w-2xl text-sm leading-6 text-slate-600">
-                    Use os atalhos abaixo para registrar a acao manual e salvar
-                    o estado operacional diretamente nesta empresa.
+                    A tela prioriza os sinais de atencao e os atalhos de
+                    tratamento para manter o trabalho no mesmo registro.
                   </p>
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                    <span>{formatCnpj(company.cnpj)}</span>
+                    <span className="text-slate-300">-</span>
+                    <span>{company.nomeFantasia || company.razaoSocial}</span>
+                  </div>
                 </div>
 
-                <dl className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Status de acesso
-                    </dt>
-                    <dd className="mt-1 text-sm font-medium text-slate-900">
-                      {STATUS_ACESSO_LABELS[company.statusAcesso]}
-                    </dd>
+                {operationalAttention ? (
+                  <div
+                    className={`rounded-2xl border p-4 ${getStatusToneClasses(operationalAttention.tone)}`}
+                  >
+                    <p className="text-xs font-medium uppercase tracking-[0.22em] opacity-80">
+                      Leitura operacional
+                    </p>
+                    <p className="mt-1 text-sm font-semibold">
+                      {operationalAttention.title}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {operationalAttention.items.length === 0 ? (
+                        <span className="rounded-full border border-white/60 bg-white/70 px-3 py-1 text-xs font-medium text-inherit">
+                          Nenhuma irregularidade aberta.
+                        </span>
+                      ) : (
+                        operationalAttention.items.map((item) => (
+                          <span
+                            className="rounded-full border border-white/60 bg-white/70 px-3 py-1 text-xs font-medium text-inherit"
+                            key={item}
+                          >
+                            {item}
+                          </span>
+                        ))
+                      )}
+                    </div>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Status de procuracao
-                    </dt>
-                    <dd className="mt-1 text-sm font-medium text-slate-900">
-                      {STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
-                    </dd>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Pendencia operacional
-                    </dt>
-                    <dd className="mt-1 text-sm font-medium text-slate-900">
-                      {company.pendenciaOperacional ? 'Sim' : 'Nao'}
-                    </dd>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Ultima conferencia de acesso
-                    </dt>
-                    <dd className="mt-1 text-sm font-medium text-slate-900">
-                      {formatDateTime(company.ultimaConferenciaAcessoEm)}
-                    </dd>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Ultima conferencia de procuracao
-                    </dt>
-                    <dd className="mt-1 text-sm font-medium text-slate-900">
-                      {formatDateTime(company.ultimaConferenciaProcuracaoEm)}
-                    </dd>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Ultima conferencia operacional
-                    </dt>
-                    <dd className="mt-1 text-sm font-medium text-slate-900">
-                      {formatDateTime(company.ultimaConferenciaOperacionalEm)}
-                    </dd>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Regularizada em
-                    </dt>
-                    <dd className="mt-1 text-sm font-medium text-slate-900">
-                      {formatDateTime(company.regularizadaEm)}
-                    </dd>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                    <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Observacoes operacionais
-                    </dt>
-                    <dd className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-900">
-                      {company.observacoesOperacionais?.trim() ||
-                        'Sem observacoes.'}
-                    </dd>
-                  </div>
-                </dl>
+                ) : null}
+
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <StatusCard
+                    label="Status de acesso"
+                    note={
+                      company.statusAcesso === 'DISPONIVEL'
+                        ? 'Acesso regular'
+                        : company.statusAcesso === 'NAO_VERIFICADO'
+                          ? 'Pendente de conferencia'
+                          : 'Requer tratamento'
+                    }
+                    tone={getAccessTone(company.statusAcesso)}
+                    value={STATUS_ACESSO_LABELS[company.statusAcesso]}
+                  />
+                  <StatusCard
+                    label="Status de procuracao"
+                    note={
+                      company.statusProcuracao === 'VALIDA'
+                        ? 'Procuracao regular'
+                        : company.statusProcuracao === 'NAO_VERIFICADA'
+                          ? 'Pendente de conferencia'
+                          : 'Requer tratamento'
+                    }
+                    tone={getProcuracaoTone(company.statusProcuracao)}
+                    value={STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
+                  />
+                  <StatusCard
+                    label="Pendencia operacional"
+                    note={
+                      company.pendenciaOperacional
+                        ? 'A fila deve tratar'
+                        : 'Sem pendencia aberta'
+                    }
+                    tone={getPendenciaTone(company.pendenciaOperacional)}
+                    value={company.pendenciaOperacional ? 'Aberta' : 'Fechada'}
+                  />
+                  <StatusCard
+                    label="Responsavel interno"
+                    note={
+                      company.responsavelInterno
+                        ? company.responsavelInterno.email
+                        : 'Vinculo pendente'
+                    }
+                    tone={company.responsavelInterno ? 'neutral' : 'warning'}
+                    value={
+                      company.responsavelInterno
+                        ? company.responsavelInterno.nome
+                        : 'Sem responsavel'
+                    }
+                  />
+                </div>
               </div>
 
-              <div className="space-y-3 xl:w-96">
-                <p className="text-sm font-medium text-slate-900">
+              <aside className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-900">
                   Acoes rapidas
                 </p>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <p className="text-sm leading-6 text-slate-600">
+                  Use estes atalhos para registrar a situacao operacional sem
+                  sair da empresa.
+                </p>
+                <div className="grid gap-3">
                   <button
                     className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={isSaving}
@@ -598,7 +738,7 @@ export default function CompanyDetailPage() {
                   As acoes salvam imediatamente no registro da empresa e
                   atualizam o painel de pendencias na proxima consulta.
                 </p>
-              </div>
+              </aside>
             </div>
           </section>
         ) : null}
@@ -608,10 +748,10 @@ export default function CompanyDetailPage() {
             <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Dados da empresa
+                  Dados principais
                 </h2>
                 <p className="text-sm text-slate-600">
-                  Informacoes atuais vindas da API.
+                  Identidade, responsavel e marcos da operacao atual.
                 </p>
               </div>
 
@@ -732,32 +872,90 @@ export default function CompanyDetailPage() {
                 </div>
               </dl>
 
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  Observacoes operacionais
-                </h3>
-                <p className="whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                  {company.observacoesOperacionais?.trim() || '-'}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Observacoes operacionais
+                    </h3>
+                    <p className="text-xs leading-5 text-slate-500">
+                      Campo de tratamento para contexto, pendencias e proximo
+                      passo.
+                    </p>
+                  </div>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Leitura atual
+                  </span>
+                </div>
+                <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                  {formatOperationalText(company.observacoesOperacionais)}
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  Integracoes
-                </h3>
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Integracoes
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Estado atual da integracao existente na empresa.
+                    </p>
+                  </div>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    {company.integracoes.length} registro(s)
+                  </span>
+                </div>
                 {company.integracoes.length === 0 ? (
-                  <p className="text-sm text-slate-600">
+                  <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
                     Sem integracoes registradas.
                   </p>
                 ) : (
-                  <ul className="space-y-2">
+                  <ul className="space-y-3">
                     {company.integracoes.map((integration) => (
                       <li
-                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700"
+                        className="rounded-2xl border border-slate-200 bg-white p-4"
                         key={integration.id}
                       >
-                        {integration.tipoIntegracao} -{' '}
-                        {integration.statusIntegracao}
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold text-slate-900">
+                              {integration.tipoIntegracao}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Atualizado em {formatDateTime(integration.updatedAt)}
+                            </p>
+                          </div>
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                              getIntegrationTone(integration.statusIntegracao)
+                            )}`}
+                          >
+                            {integration.statusIntegracao}
+                          </span>
+                        </div>
+                        {integration.observacoes ? (
+                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                            {integration.observacoes}
+                          </p>
+                        ) : null}
+                        {integration.mensagemErroAtual ? (
+                          <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                            {integration.mensagemErroAtual}
+                          </p>
+                        ) : null}
+                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
+                          {integration.ultimoSucessoEm ? (
+                            <span>
+                              Ultimo sucesso {formatDateTime(integration.ultimoSucessoEm)}
+                            </span>
+                          ) : null}
+                          {integration.ultimoErroEm ? (
+                            <span>
+                              Ultimo erro {formatDateTime(integration.ultimoErroEm)}
+                            </span>
+                          ) : null}
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -769,10 +967,11 @@ export default function CompanyDetailPage() {
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="mb-5">
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Edicao basica e controle operacional
+                  Atualizacao operacional
                 </h2>
                 <p className="text-sm text-slate-600">
-                  Atualize os campos principais e os status manuais da carteira.
+                  Atualize os campos principais e os status que alimentam o
+                  tratamento da empresa.
                 </p>
               </div>
 
@@ -1032,6 +1231,10 @@ export default function CompanyDetailPage() {
                   <span className="block text-sm font-medium text-slate-700">
                     Observacoes operacionais
                   </span>
+                  <p className="text-xs leading-5 text-slate-500">
+                    Use este campo para contexto, combinados e o proximo passo
+                    operacional.
+                  </p>
                   <textarea
                     className="min-h-32 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
                     name="observacoesOperacionais"
@@ -1041,6 +1244,7 @@ export default function CompanyDetailPage() {
                         observacoesOperacionais: event.target.value
                       }))
                     }
+                    placeholder="Registre contexto, pendencias, contato e o proximo passo."
                     value={form.observacoesOperacionais}
                   />
                 </label>
