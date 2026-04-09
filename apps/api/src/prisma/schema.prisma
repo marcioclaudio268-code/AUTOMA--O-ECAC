@@ -55,6 +55,12 @@ enum StatusPendenciaOperacional {
   RESOLVIDA
 }
 
+enum CriticidadePendenciaOperacional {
+  BAIXA
+  MEDIA
+  ALTA
+}
+
 enum TipoEventoOperacional {
   VARREDURA_RELEVANTE
   MUDANCA_ESTADO
@@ -186,6 +192,7 @@ model PendenciaOperacional {
   empresa    Empresa                   @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   tipo       TipoPendenciaOperacional
   status     StatusPendenciaOperacional @default(ABERTA)
+  criticidade CriticidadePendenciaOperacional @default(MEDIA)
   descricao  String                    @db.Text
   origem     String?
   resolvedAt DateTime?
@@ -193,6 +200,7 @@ model PendenciaOperacional {
 
   @@index([empresaId])
   @@index([status])
+  @@index([empresaId, status, criticidade])
   @@index([tipo])
   @@index([createdAt])
 }

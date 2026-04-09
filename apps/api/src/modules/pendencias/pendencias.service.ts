@@ -9,7 +9,9 @@ import {
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { ListPendenciasQueryDto } from './dto/list-pendencias-query.dto';
+import { ListCompanyPendenciasQueryDto } from './dto/list-company-pendencias-query.dto';
 import {
+  CriticidadePendenciaEnum,
   PendenciaItem,
   PendenciaOperacionalRecord,
   SEM_RESPONSAVEL_LABEL,
@@ -22,16 +24,19 @@ const MANUAL_SCAN_ORIGIN = 'VARREDURA_MANUAL';
 const MANUAL_SCAN_FOLLOW_UPS = [
   {
     descricao: 'Acesso irregular identificado na varredura manual.',
+    criticidade: CriticidadePendenciaEnum.ALTA,
     finding: 'Acesso irregular',
     tipo: TipoPendenciaOperacional.ACESSO
   },
   {
     descricao: 'Procuracao irregular identificada na varredura manual.',
+    criticidade: CriticidadePendenciaEnum.MEDIA,
     finding: 'Procuracao irregular',
     tipo: TipoPendenciaOperacional.PROCURACAO
   },
   {
     descricao: 'Pendencia operacional manual identificada na varredura manual.',
+    criticidade: CriticidadePendenciaEnum.ALTA,
     finding: 'Pendencia operacional manual',
     tipo: TipoPendenciaOperacional.OPERACIONAL
   }
@@ -124,6 +129,7 @@ export class PendenciasService {
       const createdPendencia = await client.pendenciaOperacional.create({
         data: {
           descricao: followUp.descricao,
+          criticidade: followUp.criticidade,
           empresaId: input.companyId,
           origem: MANUAL_SCAN_ORIGIN,
           tipo: followUp.tipo
@@ -309,7 +315,7 @@ export class PendenciasService {
 
   async listCompanyPendencias(
     companyId: string,
-    take = 5
+    query: ListCompanyPendenciasQueryDto = {}
   ): Promise<PendenciaOperacionalRecord[]> {
     return this.prisma.pendenciaOperacional.findMany({
       orderBy: [
@@ -317,11 +323,24 @@ export class PendenciasService {
           status: 'asc'
         },
         {
+          criticidade: 'desc'
+        },
+        {
           createdAt: 'desc'
         }
       ],
-      take,
+      take: query.take ?? 10,
       where: {
+        ...(query.criticidade
+          ? {
+              criticidade: query.criticidade
+            }
+          : {}),
+        ...(query.status
+          ? {
+              status: query.status
+            }
+          : {}),
         empresaId: companyId
       }
     });

@@ -38,6 +38,8 @@ export type TipoPendencia = 'ACESSO' | 'PROCURACAO' | 'OPERACIONAL';
 
 export type StatusPendenciaOperacional = 'ABERTA' | 'RESOLVIDA';
 
+export type CriticidadePendenciaOperacional = 'BAIXA' | 'MEDIA' | 'ALTA';
+
 export type PendenciaStatusAtual =
   | StatusAcessoEmpresa
   | StatusProcuracaoEmpresa
@@ -133,6 +135,7 @@ export type RecentEventosFilters = {
 
 export type PendenciaOperacionalRecord = {
   createdAt: string;
+  criticidade: CriticidadePendenciaOperacional;
   descricao: string;
   empresaId: string;
   id: string;
@@ -143,6 +146,8 @@ export type PendenciaOperacionalRecord = {
 };
 
 export type RecentPendenciasFilters = {
+  criticidade?: CriticidadePendenciaOperacional | undefined;
+  status?: StatusPendenciaOperacional | undefined;
   take?: number | undefined;
 };
 
@@ -487,6 +492,8 @@ export async function listCompanyPendencias(
 ): Promise<PendenciaOperacionalRecord[]> {
   const params = new URLSearchParams();
 
+  appendQueryParam(params, 'criticidade', filters.criticidade);
+  appendQueryParam(params, 'status', filters.status);
   appendQueryParam(params, 'take', filters.take);
 
   const query = params.toString();

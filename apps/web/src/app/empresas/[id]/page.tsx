@@ -64,6 +64,10 @@ type OperationalQuickAction =
   | 'regularizarPendenciaOperacional'
   | 'reabrirPendenciaOperacional';
 
+type PendenciaStatusFilter = 'TODAS' | PendenciaOperacionalRecord['status'];
+type PendenciaCriticidadeFilter =
+  'TODAS' | PendenciaOperacionalRecord['criticidade'];
+
 const initialFormState: CompanyFormState = {
   cnpj: '',
   naCarteira: false,
@@ -216,6 +220,34 @@ function getPendenciaTone(
   return value === 'RESOLVIDA' ? 'success' : 'danger';
 }
 
+function formatPendenciaCriticidadeLabel(
+  value: PendenciaOperacionalRecord['criticidade']
+) {
+  switch (value) {
+    case 'ALTA':
+      return 'Alta';
+    case 'MEDIA':
+      return 'Media';
+    case 'BAIXA':
+    default:
+      return 'Baixa';
+  }
+}
+
+function getPendenciaCriticidadeTone(
+  value: PendenciaOperacionalRecord['criticidade']
+): StatusTone {
+  switch (value) {
+    case 'ALTA':
+      return 'danger';
+    case 'MEDIA':
+      return 'warning';
+    case 'BAIXA':
+    default:
+      return 'neutral';
+  }
+}
+
 function getScanTone(
   value: VarreduraRecord['statusExecucao']
 ): StatusTone {
@@ -362,6 +394,10 @@ export default function CompanyDetailPage() {
   const [pendenciasOperacionais, setPendenciasOperacionais] = useState<
     PendenciaOperacionalRecord[]
   >([]);
+  const [pendenciaStatusFilter, setPendenciaStatusFilter] =
+    useState<PendenciaStatusFilter>('TODAS');
+  const [pendenciaCriticidadeFilter, setPendenciaCriticidadeFilter] =
+    useState<PendenciaCriticidadeFilter>('TODAS');
   const [form, setForm] = useState<CompanyFormState>(initialFormState);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -374,6 +410,16 @@ export default function CompanyDetailPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [flashMessage, setFlashMessage] = useState('');
+
+  function buildPendenciaFilters(
+    status: PendenciaStatusFilter,
+    criticidade: PendenciaCriticidadeFilter
+  ) {
+    return {
+      ...(status === 'TODAS' ? {} : { status }),
+      ...(criticidade === 'TODAS' ? {} : { criticidade })
+    };
+  }
 
   useEffect(() => {
     const paramsSearch = new URLSearchParams(window.location.search);
@@ -439,7 +485,10 @@ export default function CompanyDetailPage() {
           }
 
           try {
-            const pendencias = await listCompanyPendencias(companyId);
+            const pendencias = await listCompanyPendencias(
+              companyId,
+              buildPendenciaFilters('TODAS', 'TODAS')
+            );
 
             if (active) {
               setPendenciasOperacionais(pendencias);
@@ -642,7 +691,13 @@ export default function CompanyDetailPage() {
     }
 
     try {
-      const pendencias = await listCompanyPendencias(companyId);
+      const pendencias = await listCompanyPendencias(
+        companyId,
+        buildPendenciaFilters(
+          pendenciaStatusFilter,
+          pendenciaCriticidadeFilter
+        )
+      );
       setPendenciasOperacionais(pendencias);
     } catch {
       setPendenciasOperacionais([]);
@@ -1344,9 +1399,65 @@ export default function CompanyDetailPage() {
                     {pendenciasOperacionais.length} registro(s)
                   </span>
                 </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
+                    <label className="space-y-2">
+                      <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Status
+                      </span>
+                      <select
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="pendenciaStatusFilter"
+                        onChange={(event) =>
+                          setPendenciaStatusFilter(
+                            event.target.value as PendenciaStatusFilter
+                          )
+                        }
+                        value={pendenciaStatusFilter}
+                      >
+                        <option value="TODAS">Todas</option>
+                        <option value="ABERTA">Abertas</option>
+                        <option value="RESOLVIDA">Resolvidas</option>
+                      </select>
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Criticidade
+                      </span>
+                      <select
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="pendenciaCriticidadeFilter"
+                        onChange={(event) =>
+                          setPendenciaCriticidadeFilter(
+                            event.target.value as PendenciaCriticidadeFilter
+                          )
+                        }
+                        value={pendenciaCriticidadeFilter}
+                      >
+                        <option value="TODAS">Todas</option>
+                        <option value="ALTA">Alta</option>
+                        <option value="MEDIA">Media</option>
+                        <option value="BAIXA">Baixa</option>
+                      </select>
+                    </label>
+
+                    <div className="flex items-end">
+                      <button
+                        className="inline-flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={isSaving}
+                        onClick={() => void refreshOperationalData()}
+                        type="button"
+                      >
+                        Aplicar filtros
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 {pendenciasOperacionais.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
-                    Nenhuma pendencia operacional recente registrada.
+                    Nenhuma pendencia operacional encontrada para os filtros
+                    selecionados.
                   </p>
                 ) : (
                   <ul className="space-y-3">
@@ -1368,14 +1479,27 @@ export default function CompanyDetailPage() {
                               <p className="text-xs text-slate-500">
                                 Criada em {formatDateTime(pendencia.createdAt)}
                               </p>
+                              <div className="flex flex-wrap gap-2 pt-1">
+                                <span
+                                  className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                    getPendenciaTone(pendencia.status)
+                                  )}`}
+                                >
+                                  {formatPendenciaStatusLabel(pendencia.status)}
+                                </span>
+                                <span
+                                  className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                    getPendenciaCriticidadeTone(
+                                      pendencia.criticidade
+                                    )
+                                  )}`}
+                                >
+                                  {formatPendenciaCriticidadeLabel(
+                                    pendencia.criticidade
+                                  )}
+                                </span>
+                              </div>
                             </div>
-                            <span
-                              className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
-                                getPendenciaTone(pendencia.status)
-                              )}`}
-                            >
-                              {formatPendenciaStatusLabel(pendencia.status)}
-                            </span>
                           </div>
                           <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
                             {pendencia.descricao}

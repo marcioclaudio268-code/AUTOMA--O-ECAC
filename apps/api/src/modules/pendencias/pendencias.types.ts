@@ -13,6 +13,15 @@ export const TipoPendenciaEnum = {
 export type TipoPendencia =
   (typeof TipoPendenciaEnum)[keyof typeof TipoPendenciaEnum];
 
+export const CriticidadePendenciaEnum = {
+  ALTA: 'ALTA',
+  BAIXA: 'BAIXA',
+  MEDIA: 'MEDIA'
+} as const;
+
+export type CriticidadePendencia =
+  (typeof CriticidadePendenciaEnum)[keyof typeof CriticidadePendenciaEnum];
+
 export const SEM_RESPONSAVEL_LABEL = 'Sem responsável';
 
 export type PendenciaStatusAtual =
@@ -38,6 +47,7 @@ export type PendenciaItem = {
 export type PendenciaOperacionalRecord = Prisma.PendenciaOperacionalGetPayload<{
   select: {
     createdAt: true;
+    criticidade: true;
     descricao: true;
     empresaId: true;
     id: true;
