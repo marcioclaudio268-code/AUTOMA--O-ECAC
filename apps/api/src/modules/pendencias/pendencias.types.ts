@@ -1,4 +1,5 @@
 import {
+  Prisma,
   StatusAcessoEmpresa,
   StatusProcuracaoEmpresa
 } from '@prisma/client';
@@ -33,3 +34,16 @@ export type PendenciaItem = {
   tipoPendencia: TipoPendencia;
   ultimaConferenciaOperacionalEm: Date | null;
 };
+
+export type PendenciaOperacionalRecord = Prisma.PendenciaOperacionalGetPayload<{
+  select: {
+    createdAt: true;
+    descricao: true;
+    empresaId: true;
+    id: true;
+    origem: true;
+    resolvedAt: true;
+    status: true;
+    tipo: true;
+  };
+}>;
