@@ -6,8 +6,10 @@ import { useParams, useRouter } from 'next/navigation';
 
 import { requireSession, signOut } from '@/lib/auth';
 import {
+  executeManualScan,
   getCompany,
   listResponsaveis,
+  listVarreduras,
   updateCompany,
   type CompanyCreateInput,
   type CompanyIntegration,
@@ -16,7 +18,8 @@ import {
   type RegimeTributario,
   type ResponsavelInternoRecord,
   type StatusAcessoEmpresa,
-  type StatusProcuracaoEmpresa
+  type StatusProcuracaoEmpresa,
+  type VarreduraRecord
 } from '@/lib/api';
 import {
   REGIME_TRIBUTARIO_OPTIONS,
@@ -49,6 +52,7 @@ type CompanyFormState = {
 };
 
 type OperationalQuickAction =
+  | 'executarVarreduraManual'
   | 'registrarConferencia'
   | 'marcarAcessoDisponivel'
   | 'marcarProcuracaoValida'
@@ -132,6 +136,39 @@ function formatOperationalDate(value: string | null | undefined) {
 function formatOperationalText(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : 'Sem observacoes.';
+}
+
+function formatScanOutcome(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0
+    ? normalized
+    : 'Sem resumo da varredura.';
+}
+
+function formatScanStatusLabel(value: VarreduraRecord['statusExecucao']) {
+  switch (value) {
+    case 'CONCLUIDA':
+      return 'Concluida';
+    case 'FALHA':
+      return 'Falha';
+    case 'INICIADA':
+    default:
+      return 'Iniciada';
+  }
+}
+
+function getScanTone(
+  value: VarreduraRecord['statusExecucao']
+): StatusTone {
+  switch (value) {
+    case 'CONCLUIDA':
+      return 'success';
+    case 'FALHA':
+      return 'danger';
+    case 'INICIADA':
+    default:
+      return 'warning';
+  }
 }
 
 type StatusTone = 'success' | 'warning' | 'danger' | 'neutral';
@@ -259,6 +296,7 @@ export default function CompanyDetailPage() {
   const [responsaveis, setResponsaveis] = useState<ResponsavelInternoRecord[]>(
     []
   );
+  const [varreduras, setVarreduras] = useState<VarreduraRecord[]>([]);
   const [form, setForm] = useState<CompanyFormState>(initialFormState);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -306,6 +344,18 @@ export default function CompanyDetailPage() {
 
           if (active) {
             setResponsaveis(items);
+          }
+
+          try {
+            const scans = await listVarreduras(companyId);
+
+            if (active) {
+              setVarreduras(scans);
+            }
+          } catch {
+            if (active) {
+              setVarreduras([]);
+            }
           }
         } catch (responsaveisError) {
           if (!active) {
@@ -472,6 +522,54 @@ export default function CompanyDetailPage() {
           action
         );
         break;
+    }
+  }
+
+  async function refreshOperationalData() {
+    if (!companyId) {
+      throw new Error('Empresa invalida.');
+    }
+
+    const [updatedCompany, scans] = await Promise.all([
+      getCompany(companyId),
+      listVarreduras(companyId)
+    ]);
+
+    setCompany(updatedCompany);
+    setForm(toFormState(updatedCompany));
+    setVarreduras(scans);
+  }
+
+  async function handleManualScan() {
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
+    setIsSaving(true);
+    setActiveQuickAction('executarVarreduraManual');
+    setError('');
+    setMessage('');
+    setFlashMessage('');
+
+    try {
+      if (!companyId) {
+        throw new Error('Empresa invalida.');
+      }
+
+      const result = await executeManualScan(companyId);
+      await refreshOperationalData();
+      setMessage(result.varredura.resumoResultado || 'Varredura manual executada.');
+    } catch (scanError) {
+      setError(
+        scanError instanceof Error
+          ? scanError.message
+          : 'Falha ao executar varredura manual.'
+      );
+    } finally {
+      submitLockRef.current = false;
+      setIsSaving(false);
+      setActiveQuickAction(null);
     }
   }
 
@@ -667,6 +765,16 @@ export default function CompanyDetailPage() {
                   sair da empresa.
                 </p>
                 <div className="grid gap-3">
+                  <button
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() => void handleManualScan()}
+                    type="button"
+                  >
+                    {activeQuickAction === 'executarVarreduraManual'
+                      ? 'Executando...'
+                      : 'Executar varredura manual'}
+                  </button>
                   <button
                     className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={isSaving}
@@ -955,6 +1063,72 @@ export default function CompanyDetailPage() {
                               Ultimo erro {formatDateTime(integration.ultimoErroEm)}
                             </span>
                           ) : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Varreduras recentes
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Ultimas execucoes manuais registradas para a empresa.
+                    </p>
+                  </div>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    {varreduras.length} registro(s)
+                  </span>
+                </div>
+                {varreduras.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
+                    Nenhuma varredura registrada ainda.
+                  </p>
+                ) : (
+                  <ul className="space-y-3">
+                    {varreduras.map((scan) => (
+                      <li
+                        className="rounded-2xl border border-slate-200 bg-white p-4"
+                        key={scan.id}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold text-slate-900">
+                              Varredura {formatScanStatusLabel(scan.statusExecucao)}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Iniciada em {formatDateTime(scan.iniciadoEm)}
+                            </p>
+                          </div>
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                              getScanTone(scan.statusExecucao)
+                            )}`}
+                          >
+                            {formatScanStatusLabel(scan.statusExecucao)}
+                          </span>
+                        </div>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          <div className="space-y-1">
+                            <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                              Finalizada em
+                            </dt>
+                            <dd className="text-sm font-medium text-slate-900">
+                              {formatDateTime(scan.finalizadoEm)}
+                            </dd>
+                          </div>
+                          <div className="space-y-1">
+                            <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                              Resultado
+                            </dt>
+                            <dd className="text-sm font-medium text-slate-900">
+                              {formatScanOutcome(scan.resumoResultado)}
+                            </dd>
+                          </div>
                         </div>
                       </li>
                     ))}

@@ -26,6 +26,10 @@ export type StatusIntegracao =
   | 'ERRO'
   | 'NAO_CONFIGURADA';
 
+export type TipoVarredura = 'MANUAL';
+
+export type StatusExecucaoVarredura = 'INICIADA' | 'CONCLUIDA' | 'FALHA';
+
 export type TipoPendencia = 'ACESSO' | 'PROCURACAO' | 'OPERACIONAL';
 
 export type PendenciaStatusAtual =
@@ -85,6 +89,26 @@ export type PendenciaListFilters = {
   empresaId?: string | undefined;
   responsavelInternoId?: string | undefined;
   tipoPendencia?: TipoPendencia | undefined;
+};
+
+export type VarreduraRecord = {
+  createdAt: string;
+  empresaId: string;
+  finalizadoEm: string | null;
+  id: string;
+  iniciadoEm: string;
+  resumoResultado: string | null;
+  statusExecucao: StatusExecucaoVarredura;
+  tipoVarredura: TipoVarredura;
+  updatedAt: string;
+};
+
+export type ManualScanExecutionResponse = {
+  varredura: VarreduraRecord;
+};
+
+export type RecentScansFilters = {
+  take?: number | undefined;
 };
 
 export type ResponsavelInternoDetail = {
@@ -222,7 +246,7 @@ function parseResponseBody(text: string): unknown {
 function appendQueryParam(
   params: URLSearchParams,
   key: string,
-  value: string | boolean | undefined
+  value: string | boolean | number | undefined
 ) {
   if (value === undefined) {
     return;
@@ -376,6 +400,32 @@ export async function listPendencias(
 
   return apiRequest<PendenciaListItem[]>(
     query ? `/pendencias?${query}` : '/pendencias'
+  );
+}
+
+export async function executeManualScan(
+  companyId: string
+): Promise<ManualScanExecutionResponse> {
+  return apiRequest<ManualScanExecutionResponse>(
+    `/companies/${companyId}/scans/manual`,
+    {
+      method: 'POST'
+    }
+  );
+}
+
+export async function listVarreduras(
+  companyId: string,
+  filters: RecentScansFilters = {}
+): Promise<VarreduraRecord[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'take', filters.take);
+
+  const query = params.toString();
+
+  return apiRequest<VarreduraRecord[]>(
+    query ? `/companies/${companyId}/scans/recent?${query}` : `/companies/${companyId}/scans/recent`
   );
 }
 
