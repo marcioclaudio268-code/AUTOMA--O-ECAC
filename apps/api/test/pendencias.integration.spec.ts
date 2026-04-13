@@ -16,10 +16,12 @@ import {
   PerfilUsuario,
   PrismaClient,
   PrioridadePendencia,
+  ResultadoLogExecucao,
   RegimeTributario,
   StatusAcessoEmpresa,
   StatusPendencia,
   StatusProcuracaoEmpresa,
+  TipoLogExecucao,
   TipoPendencia
 } from '@prisma/client';
 import EmbeddedPostgres from 'embedded-postgres';
@@ -61,6 +63,7 @@ let sessionCookie = '';
 let tempRoot = '';
 let postgresPort = 0;
 let seededData: SeededPendenciasData;
+let scenarioSequence = 0;
 
 beforeAll(async () => {
   tempRoot = await mkdtemp(
@@ -232,6 +235,149 @@ describe('filtros da fila de pendencias persistida', () => {
   }, TEST_TIMEOUT);
 });
 
+describe('tratamento operacional de pendencias persistidas', () => {
+  test('GET /pendencias/:id retorna o detalhe da pendencia persistida', async () => {
+    const response = await requestJson(
+      `/pendencias/${seededData.pendenciaAbertaOperacionalId}`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      empresaId: seededData.empresaAbertaId,
+      id: seededData.pendenciaAbertaOperacionalId,
+      status: StatusPendencia.ABERTA,
+      tipo: TipoPendencia.OPERACIONAL
+    });
+  }, TEST_TIMEOUT);
+
+  test('PATCH /pendencias/:id altera status, gera log e ajusta o resumo operacional da empresa', async () => {
+    const scenario = await createPendenciaScenario(prisma, {
+      descricao: 'Pendencia operacional para fechamento.',
+      prioridade: PrioridadePendencia.ALTA,
+      tipo: TipoPendencia.OPERACIONAL
+    });
+
+    const response = await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        status: StatusPendencia.RESOLVIDA
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      id: scenario.pendenciaId,
+      status: StatusPendencia.RESOLVIDA,
+      tipo: TipoPendencia.OPERACIONAL
+    });
+    expect(
+      (response.body as { fechadaEm: string | null }).fechadaEm
+    ).not.toBeNull();
+
+    const empresa = await prisma.empresa.findUniqueOrThrow({
+      select: {
+        pendenciaOperacional: true,
+        regularizadaEm: true
+      },
+      where: {
+        id: scenario.empresaId
+      }
+    });
+
+    expect(empresa.pendenciaOperacional).toBe(false);
+    expect(empresa.regularizadaEm).not.toBeNull();
+
+    const log = await prisma.logExecucao.findFirstOrThrow({
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        pendenciaId: scenario.pendenciaId,
+        tipo: TipoLogExecucao.REGULARIZACAO_PENDENCIA
+      }
+    });
+
+    expect(log.resultado).toBe(ResultadoLogExecucao.SUCESSO);
+    expect(log.resumo).toBe('Pendencia regularizada: Pendencia operacional de teste');
+  }, TEST_TIMEOUT);
+
+  test('PATCH /pendencias/:id reatribui o responsavel e grava log coerente', async () => {
+    const scenario = await createPendenciaScenario(prisma, {
+      descricao: 'Pendencia para reatribuicao.',
+      tipo: TipoPendencia.ACESSO
+    });
+
+    const response = await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        responsavelInternoId: seededData.responsavelBId
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      id: scenario.pendenciaId,
+      responsavelInternoId: seededData.responsavelBId
+    });
+
+    const log = await prisma.logExecucao.findFirstOrThrow({
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        pendenciaId: scenario.pendenciaId,
+        tipo: TipoLogExecucao.REGISTRO_PENDENCIA
+      }
+    });
+
+    expect(log.resultado).toBe(ResultadoLogExecucao.SUCESSO);
+    expect(log.resumo).toBe('Pendencia reatribuida: Pendencia de acesso de teste');
+    expect(log.detalhes).toContain(
+      'Responsavel alterado de Responsavel A para Responsavel B.'
+    );
+  }, TEST_TIMEOUT);
+
+  test('PATCH /pendencias/:id registra observacao operacional e grava log coerente', async () => {
+    const scenario = await createPendenciaScenario(prisma, {
+      descricao: 'Observacao inicial.',
+      tipo: TipoPendencia.OPERACIONAL
+    });
+
+    const response = await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        descricao: 'Observacao operacional atualizada na fila global.'
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      descricao: 'Observacao operacional atualizada na fila global.',
+      id: scenario.pendenciaId
+    });
+
+    const log = await prisma.logExecucao.findFirstOrThrow({
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        pendenciaId: scenario.pendenciaId,
+        tipo: TipoLogExecucao.REGISTRO_PENDENCIA
+      }
+    });
+
+    expect(log.resultado).toBe(ResultadoLogExecucao.SUCESSO);
+    expect(log.resumo).toBe('Observacao registrada: Pendencia operacional de teste');
+    expect(log.detalhes).toContain('Observacao operacional atualizada.');
+  }, TEST_TIMEOUT);
+});
+
 async function seedPendenciasData(
   database: PrismaClient
 ): Promise<SeededPendenciasData> {
@@ -373,6 +519,55 @@ async function seedPendenciasData(
     pendenciaResolvidaProcuracaoId: pendenciaResolvidaProcuracao.id,
     responsavelAId: responsavelA.id,
     responsavelBId: responsavelB.id
+  };
+}
+
+async function createPendenciaScenario(
+  database: PrismaClient,
+  input: {
+    descricao: string;
+    prioridade?: PrioridadePendencia;
+    tipo: TipoPendencia;
+  }
+): Promise<{ empresaId: string; pendenciaId: string }> {
+  scenarioSequence += 1;
+  const companyIndex = String(scenarioSequence).padStart(6, '0');
+  const company = await database.empresa.create({
+    data: {
+      cnpj: `90000000${companyIndex}`,
+      naCarteira: true,
+      nomeFantasia: `Pendencia ${companyIndex}`,
+      pendenciaOperacional: input.tipo === TipoPendencia.OPERACIONAL,
+      razaoSocial: `Empresa Pendencia ${companyIndex} Ltda`,
+      regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+      responsavelInternoId: seededData.responsavelAId,
+      statusAcesso: StatusAcessoEmpresa.DISPONIVEL,
+      statusProcuracao: StatusProcuracaoEmpresa.VALIDA
+    }
+  });
+
+  const pendencia = await database.pendencia.create({
+    data: {
+      abertaEm: new Date('2026-04-13T10:00:00.000Z'),
+      descricao: input.descricao,
+      empresaId: company.id,
+      origem: 'MANUAL',
+      prioridade: input.prioridade ?? PrioridadePendencia.MEDIA,
+      responsavelInternoId: seededData.responsavelAId,
+      status: StatusPendencia.ABERTA,
+      tipo: input.tipo,
+      titulo:
+        input.tipo === TipoPendencia.ACESSO
+          ? 'Pendencia de acesso de teste'
+          : input.tipo === TipoPendencia.PROCURACAO
+            ? 'Pendencia de procuracao de teste'
+            : 'Pendencia operacional de teste'
+    }
+  });
+
+  return {
+    empresaId: company.id,
+    pendenciaId: pendencia.id
   };
 }
 
