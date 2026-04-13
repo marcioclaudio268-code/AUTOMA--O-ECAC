@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
 
 import {
   PrioridadePendenciaEnum,
@@ -16,31 +16,19 @@ function parseOptionalText(value: unknown): string | undefined {
   return normalized.length > 0 ? normalized : undefined;
 }
 
-export class ListPendenciasQueryDto {
-  @Transform(({ value }) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  })
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  take?: number;
+function parseOptionalNullableText(value: unknown): string | null | undefined {
+  if (value === null) {
+    return null;
+  }
 
-  @Transform(({ value }) => parseOptionalText(value))
-  @IsOptional()
-  @IsString()
-  empresaId?: string;
+  return parseOptionalText(value);
+}
 
-  @Transform(({ value }) => parseOptionalText(value))
-  @IsOptional()
-  @IsString()
-  responsavelInternoId?: string;
-
+export class CreatePendenciaDto {
   @Transform(({ value }) => parseOptionalText(value))
   @IsOptional()
   @IsEnum(TipoPendenciaEnum)
-  tipoPendencia?: (typeof TipoPendenciaEnum)[keyof typeof TipoPendenciaEnum];
+  tipo?: (typeof TipoPendenciaEnum)[keyof typeof TipoPendenciaEnum];
 
   @Transform(({ value }) => parseOptionalText(value))
   @IsOptional()
@@ -54,6 +42,26 @@ export class ListPendenciasQueryDto {
 
   @Transform(({ value }) => parseOptionalText(value))
   @IsOptional()
-  @IsEnum(PrioridadePendenciaEnum)
-  criticidade?: (typeof PrioridadePendenciaEnum)[keyof typeof PrioridadePendenciaEnum];
+  @IsString()
+  titulo?: string;
+
+  @Transform(({ value }) => parseOptionalText(value))
+  @IsOptional()
+  @IsString()
+  descricao?: string;
+
+  @Transform(({ value }) => parseOptionalText(value))
+  @IsOptional()
+  @IsString()
+  origem?: string;
+
+  @Transform(({ value }) => parseOptionalNullableText(value))
+  @IsOptional()
+  @IsString()
+  responsavelInternoId?: string | null;
+
+  @Transform(({ value }) => parseOptionalNullableText(value))
+  @IsOptional()
+  @IsString()
+  chaveIdempotencia?: string | null;
 }

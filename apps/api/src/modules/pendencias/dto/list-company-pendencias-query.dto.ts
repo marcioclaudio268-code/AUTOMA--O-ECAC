@@ -1,23 +1,47 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { Transform } from 'class-transformer';
 import {
-  CriticidadePendenciaOperacional,
-  StatusPendenciaOperacional
-} from '@prisma/client';
+  PrioridadePendenciaEnum,
+  StatusPendenciaEnum,
+  TipoPendenciaEnum
+} from '../pendencias.types';
+
+function parseOptionalText(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
 
 export class ListCompanyPendenciasQueryDto {
   @Type(() => Number)
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(10)
+  @Max(100)
   take?: number;
 
-  @IsEnum(StatusPendenciaOperacional)
+  @IsEnum(StatusPendenciaEnum)
   @IsOptional()
-  status?: StatusPendenciaOperacional;
+  status?: (typeof StatusPendenciaEnum)[keyof typeof StatusPendenciaEnum];
 
-  @IsEnum(CriticidadePendenciaOperacional)
+  @IsEnum(PrioridadePendenciaEnum)
   @IsOptional()
-  criticidade?: CriticidadePendenciaOperacional;
+  prioridade?: (typeof PrioridadePendenciaEnum)[keyof typeof PrioridadePendenciaEnum];
+
+  @IsEnum(PrioridadePendenciaEnum)
+  @IsOptional()
+  criticidade?: (typeof PrioridadePendenciaEnum)[keyof typeof PrioridadePendenciaEnum];
+
+  @Transform(({ value }) => parseOptionalText(value))
+  @IsOptional()
+  @IsString()
+  responsavelInternoId?: string;
+
+  @IsEnum(TipoPendenciaEnum)
+  @IsOptional()
+  tipoPendencia?: (typeof TipoPendenciaEnum)[keyof typeof TipoPendenciaEnum];
 }

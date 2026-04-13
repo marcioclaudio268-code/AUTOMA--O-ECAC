@@ -1,99 +1,109 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
 import {
-  Prisma,
-  StatusPendenciaOperacional,
-  StatusAcessoEmpresa,
-  StatusProcuracaoEmpresa,
-  TipoPendenciaOperacional
-} from '@prisma/client';
+  Injectable,
+  NotFoundException
+} from '@nestjs/common';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
-import { ListPendenciasQueryDto } from './dto/list-pendencias-query.dto';
+import { LogsService } from '../logs/logs.service';
+import { CreatePendenciaDto } from './dto/create-pendencia.dto';
 import { ListCompanyPendenciasQueryDto } from './dto/list-company-pendencias-query.dto';
+import { ListPendenciasQueryDto } from './dto/list-pendencias-query.dto';
+import { UpdatePendenciaDto } from './dto/update-pendencia.dto';
 import {
-  CriticidadePendenciaEnum,
-  PendenciaItem,
-  PendenciaOperacionalRecord,
-  SEM_RESPONSAVEL_LABEL,
-  TipoPendencia,
+  mapPendenciaRecord,
+  pendenciaInclude,
+  sortPendencias,
+  type PendenciaWithRelations
+} from './pendencias.mappers';
+import {
+  type PendenciaRecord,
+  PrioridadePendenciaEnum,
+  ResultadoLogExecucaoEnum,
+  StatusPendenciaEnum,
+  TipoLogExecucaoEnum,
   TipoPendenciaEnum
 } from './pendencias.types';
 
+type PendenciaWriteClient = Prisma.TransactionClient | PrismaClient;
+
+type OperationalCompanyRow = {
+  id: string;
+  naCarteira: boolean;
+  pendenciaOperacional: boolean;
+  razaoSocial: string;
+  regularizadaEm: Date | null;
+  responsavelInternoId: string | null;
+};
+
+type ManualScanFollowUp = {
+  descricao: string;
+  finding: string;
+  prioridade: (typeof PrioridadePendenciaEnum)[keyof typeof PrioridadePendenciaEnum];
+  tipo: (typeof TipoPendenciaEnum)[keyof typeof TipoPendenciaEnum];
+  titulo: string;
+};
+
+const DEFAULT_PENDENCIA_ORIGEM = 'MANUAL';
 const MANUAL_SCAN_ORIGIN = 'VARREDURA_MANUAL';
 
-const MANUAL_SCAN_FOLLOW_UPS = [
+const MANUAL_SCAN_FOLLOW_UPS: ManualScanFollowUp[] = [
   {
     descricao: 'Acesso irregular identificado na varredura manual.',
-    criticidade: CriticidadePendenciaEnum.ALTA,
     finding: 'Acesso irregular',
-    tipo: TipoPendenciaOperacional.ACESSO
+    prioridade: PrioridadePendenciaEnum.ALTA,
+    tipo: TipoPendenciaEnum.ACESSO,
+    titulo: 'Pendencia de acesso irregular'
   },
   {
     descricao: 'Procuracao irregular identificada na varredura manual.',
-    criticidade: CriticidadePendenciaEnum.MEDIA,
     finding: 'Procuracao irregular',
-    tipo: TipoPendenciaOperacional.PROCURACAO
+    prioridade: PrioridadePendenciaEnum.MEDIA,
+    tipo: TipoPendenciaEnum.PROCURACAO,
+    titulo: 'Pendencia de procuracao irregular'
   },
   {
     descricao: 'Pendencia operacional manual identificada na varredura manual.',
-    criticidade: CriticidadePendenciaEnum.ALTA,
     finding: 'Pendencia operacional manual',
-    tipo: TipoPendenciaOperacional.OPERACIONAL
+    prioridade: PrioridadePendenciaEnum.ALTA,
+    tipo: TipoPendenciaEnum.OPERACIONAL,
+    titulo: 'Pendencia operacional manual'
   }
-] as const;
+];
 
-type PendenciaEmpresa = {
-  cnpj: string;
-  id: string;
-  nomeFantasia: string | null;
-  observacoesOperacionais: string | null;
-  pendenciaOperacional: boolean;
-  razaoSocial: string;
-  responsavelInterno: {
-    nome: string;
-  } | null;
-  responsavelInternoId: string | null;
-  statusAcesso: StatusAcessoEmpresa;
-  statusProcuracao: StatusProcuracaoEmpresa;
-  ultimaConferenciaOperacionalEm: Date | null;
+const DEFAULT_TITLES: Record<
+  (typeof TipoPendenciaEnum)[keyof typeof TipoPendenciaEnum],
+  string
+> = {
+  ACESSO: 'Pendencia de acesso manual',
+  OPERACIONAL: 'Pendencia operacional manual',
+  PROCURACAO: 'Pendencia de procuracao manual'
 };
 
-const STATUS_ACESSO_NAO_REGULAR = new Set<StatusAcessoEmpresa>([
-  StatusAcessoEmpresa.BLOQUEADO,
-  StatusAcessoEmpresa.INDISPONIVEL,
-  StatusAcessoEmpresa.NAO_VERIFICADO
-]);
-
-const STATUS_PROCURACAO_NAO_REGULAR = new Set<StatusProcuracaoEmpresa>([
-  StatusProcuracaoEmpresa.INVALIDA,
-  StatusProcuracaoEmpresa.NAO_VERIFICADA,
-  StatusProcuracaoEmpresa.PENDENTE
-]);
-
-const TIPO_PENDENCIA_ORDEM: Record<TipoPendencia, number> = {
-  [TipoPendenciaEnum.ACESSO]: 0,
-  [TipoPendenciaEnum.PROCURACAO]: 1,
-  [TipoPendenciaEnum.OPERACIONAL]: 2
+const DEFAULT_DESCRIPTIONS: Record<
+  (typeof TipoPendenciaEnum)[keyof typeof TipoPendenciaEnum],
+  string
+> = {
+  ACESSO: 'Pendencia de acesso registrada manualmente.',
+  OPERACIONAL: 'Pendencia operacional registrada manualmente.',
+  PROCURACAO: 'Pendencia de procuracao registrada manualmente.'
 };
 
-const STATUS_ACESSO_MOTIVO: Record<StatusAcessoEmpresa, string> = {
-  [StatusAcessoEmpresa.BLOQUEADO]: 'Status de acesso bloqueado.',
-  [StatusAcessoEmpresa.DISPONIVEL]: 'Status de acesso disponivel.',
-  [StatusAcessoEmpresa.INDISPONIVEL]: 'Status de acesso indisponivel.',
-  [StatusAcessoEmpresa.NAO_VERIFICADO]: 'Status de acesso nao verificado.'
-};
-
-const STATUS_PROCURACAO_MOTIVO: Record<StatusProcuracaoEmpresa, string> = {
-  [StatusProcuracaoEmpresa.INVALIDA]: 'Status de procuracao invalido.',
-  [StatusProcuracaoEmpresa.NAO_VERIFICADA]:
-    'Status de procuracao nao verificado.',
-  [StatusProcuracaoEmpresa.PENDENTE]: 'Status de procuracao pendente.',
-  [StatusProcuracaoEmpresa.VALIDA]: 'Status de procuracao valida.'
+const DEFAULT_PRIORITIES: Record<
+  (typeof TipoPendenciaEnum)[keyof typeof TipoPendenciaEnum],
+  (typeof PrioridadePendenciaEnum)[keyof typeof PrioridadePendenciaEnum]
+> = {
+  ACESSO: PrioridadePendenciaEnum.ALTA,
+  OPERACIONAL: PrioridadePendenciaEnum.ALTA,
+  PROCURACAO: PrioridadePendenciaEnum.MEDIA
 };
 
 @Injectable()
 export class PendenciasService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly logsService: LogsService
+  ) {}
 
   async recordManualScanPendencias(
     client: Prisma.TransactionClient,
@@ -101,298 +111,661 @@ export class PendenciasService {
       companyId: string;
       findings: string[];
     }
-  ): Promise<PendenciaOperacionalRecord[]> {
-    const createdPendencias: PendenciaOperacionalRecord[] = [];
-    const relevantFollowUps = MANUAL_SCAN_FOLLOW_UPS.filter((followUp) =>
-      input.findings.includes(followUp.finding)
-    );
-    const hasOperationalFollowUp = relevantFollowUps.some(
-      (followUp) => followUp.tipo === TipoPendenciaOperacional.OPERACIONAL
+  ): Promise<PendenciaRecord[]> {
+    const createdPendencias: PendenciaRecord[] = [];
+    const company = await this.assertCompanyExists(client, input.companyId);
+    const hasOperationalFollowUp = MANUAL_SCAN_FOLLOW_UPS.some(
+      (item) =>
+        item.tipo === TipoPendenciaEnum.OPERACIONAL &&
+        input.findings.includes(item.finding)
     );
 
-    for (const followUp of relevantFollowUps) {
-      const openPending = await client.pendenciaOperacional.findFirst({
-        select: {
-          id: true
-        },
+    for (const followUp of MANUAL_SCAN_FOLLOW_UPS.filter((item) =>
+      input.findings.includes(item.finding)
+    )) {
+      const openPendencia = await client.pendencia.findFirst({
+        include: pendenciaInclude,
         where: {
           empresaId: input.companyId,
-          status: StatusPendenciaOperacional.ABERTA,
+          origem: MANUAL_SCAN_ORIGIN,
+          status: StatusPendenciaEnum.ABERTA,
           tipo: followUp.tipo
         }
       });
 
-      if (openPending) {
+      if (openPendencia) {
         continue;
       }
 
-      const createdPendencia = await client.pendenciaOperacional.create({
+      const created = await client.pendencia.create({
         data: {
           descricao: followUp.descricao,
-          criticidade: followUp.criticidade,
           empresaId: input.companyId,
           origem: MANUAL_SCAN_ORIGIN,
-          tipo: followUp.tipo
-        }
+          prioridade: followUp.prioridade,
+          responsavelInternoId: company.responsavelInternoId,
+          tipo: followUp.tipo,
+          titulo: followUp.titulo
+        },
+        include: pendenciaInclude
       });
 
-      createdPendencias.push(createdPendencia);
+      createdPendencias.push(mapPendenciaRecord(created as PendenciaWithRelations));
     }
 
     if (hasOperationalFollowUp) {
-      await client.empresa.update({
-        data: {
-          pendenciaOperacional: true,
-          regularizadaEm: null
-        },
-        where: {
-          id: input.companyId
-        }
-      });
+      await this.refreshOperationalSummary(client, input.companyId, null);
     }
 
     return createdPendencias;
   }
 
-  async list(query: ListPendenciasQueryDto = {}): Promise<PendenciaItem[]> {
-    const empresas = await this.prisma.empresa.findMany({
+  async list(
+    query: ListPendenciasQueryDto = {}
+  ): Promise<PendenciaRecord[]> {
+    const pendencias = await this.prisma.pendencia.findMany({
+      include: pendenciaInclude,
       orderBy: [
         {
-          razaoSocial: 'asc'
+          status: 'asc'
         },
         {
-          cnpj: 'asc'
+          abertaEm: 'desc'
         }
       ],
-      select: {
-        cnpj: true,
-        id: true,
-        naCarteira: true,
-        nomeFantasia: true,
-        observacoesOperacionais: true,
-        pendenciaOperacional: true,
-        razaoSocial: true,
-        responsavelInterno: {
-          select: {
-            nome: true
-          }
-        },
-        responsavelInternoId: true,
-        statusAcesso: true,
-        statusProcuracao: true,
-        ultimaConferenciaOperacionalEm: true
-      },
-      where: this.buildWhere(query)
+      take: query.take ?? 100,
+      where: this.buildListWhere(query)
     });
 
-    const pendencias: PendenciaItem[] = [];
+    return pendencias.map(mapPendenciaRecord).sort(sortPendencias);
+  }
 
-    for (const empresa of empresas) {
-      if (
-        query.tipoPendencia === undefined ||
-        query.tipoPendencia === TipoPendenciaEnum.ACESSO
-      ) {
-        this.pushAcessoPendencia(empresa, pendencias);
-      }
+  async listCompanyPendencias(
+    companyId: string,
+    query: ListCompanyPendenciasQueryDto = {}
+  ): Promise<PendenciaRecord[]> {
+    await this.assertCompanyExists(this.prisma, companyId);
 
-      if (
-        query.tipoPendencia === undefined ||
-        query.tipoPendencia === TipoPendenciaEnum.PROCURACAO
-      ) {
-        this.pushProcuracaoPendencia(empresa, pendencias);
-      }
+    const pendencias = await this.prisma.pendencia.findMany({
+      include: pendenciaInclude,
+      orderBy: [
+        {
+          status: 'asc'
+        },
+        {
+          abertaEm: 'desc'
+        }
+      ],
+      take: query.take ?? 10,
+      where: this.buildCompanyWhere(companyId, query)
+    });
 
-      if (
-        query.tipoPendencia === undefined ||
-        query.tipoPendencia === TipoPendenciaEnum.OPERACIONAL
-      ) {
-        this.pushOperacionalPendencia(empresa, pendencias);
+    return pendencias.map(mapPendenciaRecord).sort(sortPendencias);
+  }
+
+  async findOne(id: string): Promise<PendenciaRecord> {
+    const pendencia = await this.prisma.pendencia.findUnique({
+      include: pendenciaInclude,
+      where: {
+        id
       }
+    });
+
+    if (!pendencia) {
+      throw new NotFoundException('Pendencia nao encontrada.');
     }
 
-    return pendencias.sort((left, right) => {
-      if (left.empresaNome !== right.empresaNome) {
-        return left.empresaNome.localeCompare(right.empresaNome, 'pt-BR');
+    return mapPendenciaRecord(pendencia as PendenciaWithRelations);
+  }
+
+  async createCompanyPendencia(
+    companyId: string,
+    dto: CreatePendenciaDto,
+    executadoPorUsuarioInternoId?: string | null
+  ): Promise<PendenciaRecord> {
+    return this.prisma.$transaction(async (client) =>
+      this.createCompanyPendenciaInTransaction(
+        client,
+        companyId,
+        dto,
+        executadoPorUsuarioInternoId
+      )
+    );
+  }
+
+  async update(
+    id: string,
+    dto: UpdatePendenciaDto,
+    executadoPorUsuarioInternoId?: string | null
+  ): Promise<PendenciaRecord> {
+    return this.prisma.$transaction(async (client) => {
+      const pendencia = await client.pendencia.findUnique({
+        include: pendenciaInclude,
+        where: {
+          id
+        }
+      });
+
+      if (!pendencia) {
+        throw new NotFoundException('Pendencia nao encontrada.');
       }
 
-      return (
-        TIPO_PENDENCIA_ORDEM[left.tipoPendencia] -
-        TIPO_PENDENCIA_ORDEM[right.tipoPendencia]
-      );
+      const data: Prisma.PendenciaUncheckedUpdateInput = {};
+      let statusChanged = false;
+
+      if (dto.titulo !== undefined) {
+        const titulo = normalizeText(dto.titulo);
+
+        if (titulo !== undefined) {
+          data.titulo = titulo;
+        }
+      }
+
+      if (dto.descricao !== undefined) {
+        const descricao = normalizeText(dto.descricao);
+
+        if (descricao !== undefined) {
+          data.descricao = descricao;
+        }
+      }
+
+      if (dto.origem !== undefined) {
+        const origem = normalizeText(dto.origem);
+
+        if (origem !== undefined) {
+          data.origem = origem;
+        }
+      }
+
+      if (dto.prioridade !== undefined) {
+        data.prioridade = dto.prioridade;
+      }
+
+      if (dto.responsavelInternoId !== undefined) {
+        const responsavelInternoId = normalizeNullableText(
+          dto.responsavelInternoId
+        );
+
+        if (responsavelInternoId !== undefined) {
+          data.responsavelInternoId = responsavelInternoId;
+        }
+      }
+
+      if (dto.status !== undefined && dto.status !== pendencia.status) {
+        statusChanged = true;
+        data.status = dto.status;
+        data.fechadaEm =
+          dto.status === StatusPendenciaEnum.RESOLVIDA ? new Date() : null;
+      }
+
+      if (Object.keys(data).length === 0) {
+        return mapPendenciaRecord(pendencia as PendenciaWithRelations);
+      }
+
+      if (executadoPorUsuarioInternoId !== undefined) {
+        data.atualizadaPorUsuarioInternoId = executadoPorUsuarioInternoId;
+      }
+
+      const updated = await client.pendencia.update({
+        data,
+        include: pendenciaInclude,
+        where: {
+          id: pendencia.id
+        }
+      });
+
+      if (updated.tipo === TipoPendenciaEnum.OPERACIONAL && statusChanged) {
+        await this.refreshOperationalSummary(
+          client,
+          updated.empresaId,
+          updated.status === StatusPendenciaEnum.RESOLVIDA
+            ? updated.fechadaEm ?? new Date()
+            : null
+        );
+      }
+
+      if (statusChanged) {
+        await this.logsService.recordExecution(client, {
+          detalhes: `Pendencia ${updated.status === StatusPendenciaEnum.RESOLVIDA ? 'resolvida' : 'reaberta'}.`,
+          empresaId: updated.empresaId,
+          executadoPorUsuarioInternoId,
+          pendenciaId: updated.id,
+          resultado: ResultadoLogExecucaoEnum.SUCESSO,
+          resumo:
+            updated.status === StatusPendenciaEnum.RESOLVIDA
+              ? `Pendencia regularizada: ${updated.titulo}`
+              : `Pendencia reaberta: ${updated.titulo}`,
+          tipo:
+            updated.status === StatusPendenciaEnum.RESOLVIDA
+              ? TipoLogExecucaoEnum.REGULARIZACAO_PENDENCIA
+              : TipoLogExecucaoEnum.REGISTRO_PENDENCIA
+        });
+      } else {
+        await this.logsService.recordExecution(client, {
+          detalhes: 'Campos de pendencia ajustados manualmente.',
+          empresaId: updated.empresaId,
+          executadoPorUsuarioInternoId,
+          pendenciaId: updated.id,
+          resultado: ResultadoLogExecucaoEnum.SUCESSO,
+          resumo: `Pendencia atualizada: ${updated.titulo}`,
+          tipo: TipoLogExecucaoEnum.REGISTRO_PENDENCIA
+        });
+      }
+
+      return mapPendenciaRecord(updated as PendenciaWithRelations);
     });
   }
 
-  private buildWhere(query: ListPendenciasQueryDto): Prisma.EmpresaWhereInput {
-    const where: Prisma.EmpresaWhereInput = {
-      naCarteira: true
+  async resolveCompanyPendencia(
+    companyId: string,
+    pendenciaId: string,
+    executadoPorUsuarioInternoId?: string | null,
+    chaveIdempotencia?: string | null
+  ): Promise<PendenciaRecord> {
+    return this.prisma.$transaction(async (client) => {
+      const pendencia = await client.pendencia.findFirst({
+        include: pendenciaInclude,
+        where: {
+          empresaId: companyId,
+          id: pendenciaId
+        }
+      });
+
+      if (!pendencia) {
+        throw new NotFoundException('Pendencia nao encontrada.');
+      }
+
+      if (pendencia.status === StatusPendenciaEnum.RESOLVIDA) {
+        return mapPendenciaRecord(pendencia as PendenciaWithRelations);
+      }
+
+      const resolvedAt = new Date();
+      const resolved = await client.pendencia.update({
+        data: {
+          atualizadaPorUsuarioInternoId:
+            executadoPorUsuarioInternoId ?? pendencia.atualizadaPorUsuarioInternoId,
+          fechadaEm: resolvedAt,
+          status: StatusPendenciaEnum.RESOLVIDA
+        },
+        include: pendenciaInclude,
+        where: {
+          id: pendencia.id
+        }
+      });
+
+      if (resolved.tipo === TipoPendenciaEnum.OPERACIONAL) {
+        await this.refreshOperationalSummary(client, companyId, resolvedAt);
+      }
+
+      await this.logsService.recordExecution(client, {
+        chaveIdempotencia,
+        detalhes: `Pendencia ${resolved.status.toLowerCase()} pelo fluxo da empresa.`,
+        empresaId: companyId,
+        executadoPorUsuarioInternoId,
+        pendenciaId: resolved.id,
+        resultado: ResultadoLogExecucaoEnum.SUCESSO,
+        resumo: `Pendencia regularizada: ${resolved.titulo}`,
+        tipo: TipoLogExecucaoEnum.REGULARIZACAO_PENDENCIA
+      });
+
+      return mapPendenciaRecord(resolved as PendenciaWithRelations);
+    });
+  }
+
+  async resolveFirstOpenOperationalPendencia(
+    companyId: string,
+    executadoPorUsuarioInternoId?: string | null,
+    chaveIdempotencia?: string | null
+  ): Promise<PendenciaRecord | null> {
+    return this.prisma.$transaction(async (client) => {
+      const pendencia = await client.pendencia.findFirst({
+        include: pendenciaInclude,
+        orderBy: {
+          abertaEm: 'asc'
+        },
+        where: {
+          empresaId: companyId,
+          status: StatusPendenciaEnum.ABERTA,
+          tipo: TipoPendenciaEnum.OPERACIONAL
+        }
+      });
+
+      if (!pendencia) {
+        const company = await this.assertCompanyExists(client, companyId);
+
+        if (!company.pendenciaOperacional) {
+          return null;
+        }
+
+        const resolvedAt = new Date();
+        await this.refreshOperationalSummary(client, companyId, resolvedAt);
+        await this.logsService.recordExecution(client, {
+          chaveIdempotencia,
+          detalhes:
+            'Nenhuma pendencia operacional aberta foi encontrada; resumo operacional ajustado.',
+          empresaId: companyId,
+          executadoPorUsuarioInternoId,
+          resultado: ResultadoLogExecucaoEnum.SUCESSO,
+          resumo: 'Resumo operacional regularizado sem pendencia aberta.',
+          tipo: TipoLogExecucaoEnum.REGULARIZACAO_PENDENCIA
+        });
+
+        return null;
+      }
+
+      const resolvedAt = new Date();
+      const resolved = await client.pendencia.update({
+        data: {
+          atualizadaPorUsuarioInternoId:
+            executadoPorUsuarioInternoId ?? null,
+          fechadaEm: resolvedAt,
+          status: StatusPendenciaEnum.RESOLVIDA
+        },
+        include: pendenciaInclude,
+        where: {
+          id: pendencia.id
+        }
+      });
+
+      await this.refreshOperationalSummary(client, companyId, resolvedAt);
+      await this.logsService.recordExecution(client, {
+        chaveIdempotencia,
+        detalhes: 'Pendencia operacional regularizada pelo atalho da empresa.',
+        empresaId: companyId,
+        executadoPorUsuarioInternoId,
+        pendenciaId: resolved.id,
+        resultado: ResultadoLogExecucaoEnum.SUCESSO,
+        resumo: `Pendencia regularizada: ${resolved.titulo}`,
+        tipo: TipoLogExecucaoEnum.REGULARIZACAO_PENDENCIA
+      });
+
+      return mapPendenciaRecord(resolved as PendenciaWithRelations);
+    });
+  }
+
+  async ensureCompanyOperationalCheck(
+    companyId: string,
+    executadoPorUsuarioInternoId?: string | null,
+    chaveIdempotencia?: string | null
+  ): Promise<{ updatedAt: string }> {
+    return this.prisma.$transaction(async (client) => {
+      await this.assertCompanyExists(client, companyId);
+      const now = new Date();
+
+      await client.empresa.update({
+        data: {
+          ultimaConferenciaOperacionalEm: now
+        },
+        where: {
+          id: companyId
+        }
+      });
+
+      await this.logsService.recordExecution(client, {
+        chaveIdempotencia,
+        empresaId: companyId,
+        executadoEm: now,
+        executadoPorUsuarioInternoId,
+        resultado: ResultadoLogExecucaoEnum.SUCESSO,
+        resumo: 'Conferencia operacional registrada.',
+        tipo: TipoLogExecucaoEnum.CONFERENCIA_OPERACIONAL
+      });
+
+      return {
+        updatedAt: now.toISOString()
+      };
+    });
+  }
+
+  async removeCompanyFromWallet(
+    companyId: string,
+    executadoPorUsuarioInternoId?: string | null,
+    chaveIdempotencia?: string | null
+  ): Promise<{ updatedAt: string }> {
+    return this.prisma.$transaction(async (client) => {
+      const company = await this.assertCompanyExists(client, companyId);
+
+      if (!company.naCarteira) {
+        const now = new Date();
+        return {
+          updatedAt: now.toISOString()
+        };
+      }
+
+      const now = new Date();
+
+      await client.empresa.update({
+        data: {
+          naCarteira: false
+        },
+        where: {
+          id: companyId
+        }
+      });
+
+      await this.logsService.recordExecution(client, {
+        chaveIdempotencia,
+        empresaId: companyId,
+        executadoEm: now,
+        executadoPorUsuarioInternoId,
+        resultado: ResultadoLogExecucaoEnum.SUCESSO,
+        resumo: 'Empresa retirada da carteira.',
+        tipo: TipoLogExecucaoEnum.RETIRADA_CARTEIRA
+      });
+
+      return {
+        updatedAt: now.toISOString()
+      };
+    });
+  }
+
+  private async createCompanyPendenciaInTransaction(
+    client: PendenciaWriteClient,
+    companyId: string,
+    dto: CreatePendenciaDto,
+    executadoPorUsuarioInternoId?: string | null
+  ): Promise<PendenciaRecord> {
+    const company = await this.assertCompanyExists(client, companyId);
+    const tipo = dto.tipo ?? TipoPendenciaEnum.OPERACIONAL;
+    const prioridade = dto.prioridade ?? DEFAULT_PRIORITIES[tipo];
+    const titulo = normalizeText(dto.titulo) ?? DEFAULT_TITLES[tipo];
+    const descricao = normalizeText(dto.descricao) ?? DEFAULT_DESCRIPTIONS[tipo];
+    const origem = normalizeText(dto.origem) ?? DEFAULT_PENDENCIA_ORIGEM;
+    const responsavelInternoId =
+      normalizeNullableText(dto.responsavelInternoId) ?? company.responsavelInternoId;
+    const existing = await client.pendencia.findFirst({
+      include: pendenciaInclude,
+      where: {
+        empresaId: companyId,
+        origem,
+        prioridade,
+        responsavelInternoId,
+        status: StatusPendenciaEnum.ABERTA,
+        tipo,
+        titulo
+      }
+    });
+
+    if (existing && normalizeText(existing.descricao) === descricao) {
+      return mapPendenciaRecord(existing as PendenciaWithRelations);
+    }
+
+    const data: Prisma.PendenciaUncheckedCreateInput = {
+      abertaEm: new Date(),
+      descricao,
+      empresaId: companyId,
+      origem,
+      prioridade,
+      status: StatusPendenciaEnum.ABERTA,
+      tipo,
+      titulo
+    };
+
+    if (executadoPorUsuarioInternoId !== undefined) {
+      data.atualizadaPorUsuarioInternoId = executadoPorUsuarioInternoId;
+      data.criadaPorUsuarioInternoId = executadoPorUsuarioInternoId;
+    }
+
+    if (responsavelInternoId !== undefined) {
+      data.responsavelInternoId = responsavelInternoId;
+    }
+
+    const created = await client.pendencia.create({
+      data,
+      include: pendenciaInclude
+    });
+
+    if (tipo === TipoPendenciaEnum.OPERACIONAL) {
+      await this.refreshOperationalSummary(client, companyId, null);
+    }
+
+    await this.logsService.recordExecution(client, {
+      chaveIdempotencia: dto.chaveIdempotencia,
+      detalhes: `Pendencia criada com origem ${origem}.`,
+      empresaId: companyId,
+      executadoPorUsuarioInternoId,
+      pendenciaId: created.id,
+      resultado: ResultadoLogExecucaoEnum.SUCESSO,
+      resumo: `Pendencia registrada: ${created.titulo}`,
+      tipo: TipoLogExecucaoEnum.REGISTRO_PENDENCIA
+    });
+
+    return mapPendenciaRecord(created as PendenciaWithRelations);
+  }
+
+  private buildListWhere(
+    query: ListPendenciasQueryDto
+  ): Prisma.PendenciaWhereInput {
+    const where: Prisma.PendenciaWhereInput = {
+      empresa: {
+        naCarteira: true
+      }
     };
 
     if (query.empresaId) {
-      where.id = query.empresaId;
+      where.empresaId = query.empresaId;
     }
 
     if (query.responsavelInternoId) {
       where.responsavelInternoId = query.responsavelInternoId;
     }
 
+    const status = query.status;
+    if (status) {
+      where.status = status;
+    }
+
+    const prioridade = query.prioridade ?? query.criticidade;
+    if (prioridade) {
+      where.prioridade = prioridade;
+    }
+
+    if (query.tipoPendencia) {
+      where.tipo = query.tipoPendencia;
+    }
+
     return where;
   }
 
-  private pushAcessoPendencia(
-    empresa: PendenciaEmpresa,
-    pendencias: PendenciaItem[]
-  ) {
-    if (!STATUS_ACESSO_NAO_REGULAR.has(empresa.statusAcesso)) {
-      return;
-    }
-
-    pendencias.push({
-      empresaCnpj: empresa.cnpj,
-      empresaId: empresa.id,
-      empresaNome: empresa.razaoSocial,
-      empresaNomeFantasia: empresa.nomeFantasia,
-      linkTratamento: `/empresas/${empresa.id}`,
-      motivo: STATUS_ACESSO_MOTIVO[empresa.statusAcesso],
-      observacaoOperacional: empresa.observacoesOperacionais,
-      responsavelInternoId: empresa.responsavelInternoId,
-      responsavelInternoNome:
-        empresa.responsavelInterno?.nome?.trim() || SEM_RESPONSAVEL_LABEL,
-      statusAtual: empresa.statusAcesso,
-      tipoPendencia: TipoPendenciaEnum.ACESSO,
-      ultimaConferenciaOperacionalEm: empresa.ultimaConferenciaOperacionalEm
-    });
-  }
-
-  private pushProcuracaoPendencia(
-    empresa: PendenciaEmpresa,
-    pendencias: PendenciaItem[]
-  ) {
-    if (!STATUS_PROCURACAO_NAO_REGULAR.has(empresa.statusProcuracao)) {
-      return;
-    }
-
-    pendencias.push({
-      empresaCnpj: empresa.cnpj,
-      empresaId: empresa.id,
-      empresaNome: empresa.razaoSocial,
-      empresaNomeFantasia: empresa.nomeFantasia,
-      linkTratamento: `/empresas/${empresa.id}`,
-      motivo: STATUS_PROCURACAO_MOTIVO[empresa.statusProcuracao],
-      observacaoOperacional: empresa.observacoesOperacionais,
-      responsavelInternoId: empresa.responsavelInternoId,
-      responsavelInternoNome:
-        empresa.responsavelInterno?.nome?.trim() || SEM_RESPONSAVEL_LABEL,
-      statusAtual: empresa.statusProcuracao,
-      tipoPendencia: TipoPendenciaEnum.PROCURACAO,
-      ultimaConferenciaOperacionalEm: empresa.ultimaConferenciaOperacionalEm
-    });
-  }
-
-  private pushOperacionalPendencia(
-    empresa: PendenciaEmpresa,
-    pendencias: PendenciaItem[]
-  ) {
-    if (!empresa.pendenciaOperacional) {
-      return;
-    }
-
-    pendencias.push({
-      empresaCnpj: empresa.cnpj,
-      empresaId: empresa.id,
-      empresaNome: empresa.razaoSocial,
-      empresaNomeFantasia: empresa.nomeFantasia,
-      linkTratamento: `/empresas/${empresa.id}`,
-      motivo: 'Pendencia operacional manual registrada.',
-      observacaoOperacional: empresa.observacoesOperacionais,
-      responsavelInternoId: empresa.responsavelInternoId,
-      responsavelInternoNome:
-        empresa.responsavelInterno?.nome?.trim() || SEM_RESPONSAVEL_LABEL,
-      statusAtual: 'PENDENTE',
-      tipoPendencia: TipoPendenciaEnum.OPERACIONAL,
-      ultimaConferenciaOperacionalEm: empresa.ultimaConferenciaOperacionalEm
-    });
-  }
-
-  async listCompanyPendencias(
+  private buildCompanyWhere(
     companyId: string,
-    query: ListCompanyPendenciasQueryDto = {}
-  ): Promise<PendenciaOperacionalRecord[]> {
-    return this.prisma.pendenciaOperacional.findMany({
-      orderBy: [
-        {
-          status: 'asc'
-        },
-        {
-          criticidade: 'desc'
-        },
-        {
-          createdAt: 'desc'
-        }
-      ],
-      take: query.take ?? 10,
+    query: ListCompanyPendenciasQueryDto
+  ): Prisma.PendenciaWhereInput {
+    const where: Prisma.PendenciaWhereInput = {
+      empresaId: companyId
+    };
+
+    if (query.responsavelInternoId) {
+      where.responsavelInternoId = query.responsavelInternoId;
+    }
+
+    const status = query.status;
+    if (status) {
+      where.status = status;
+    }
+
+    const prioridade = query.prioridade ?? query.criticidade;
+    if (prioridade) {
+      where.prioridade = prioridade;
+    }
+
+    if (query.tipoPendencia) {
+      where.tipo = query.tipoPendencia;
+    }
+
+    return where;
+  }
+
+  private async assertCompanyExists(
+    client: PendenciaWriteClient,
+    companyId: string
+  ): Promise<OperationalCompanyRow> {
+    const company = await client.empresa.findUnique({
+      select: {
+        id: true,
+        naCarteira: true,
+        pendenciaOperacional: true,
+        razaoSocial: true,
+        regularizadaEm: true,
+        responsavelInternoId: true
+      },
       where: {
-        ...(query.criticidade
-          ? {
-              criticidade: query.criticidade
-            }
-          : {}),
-        ...(query.status
-          ? {
-              status: query.status
-            }
-          : {}),
-        empresaId: companyId
+        id: companyId
       }
     });
+
+    if (!company) {
+      throw new NotFoundException('Empresa nao encontrada.');
+    }
+
+    return company;
   }
 
-  async resolveCompanyPendencia(
+  private async refreshOperationalSummary(
+    client: PendenciaWriteClient,
     companyId: string,
-    pendenciaId: string
-  ): Promise<PendenciaOperacionalRecord> {
-    return this.prisma.$transaction(async (client) => {
-      const pendencia = await client.pendenciaOperacional.findFirst({
-        select: {
-          empresaId: true,
-          id: true,
-          status: true,
-          tipo: true
-        },
-        where: {
-          empresaId: companyId,
-          id: pendenciaId,
-          status: StatusPendenciaOperacional.ABERTA
-        }
-      });
-
-      if (!pendencia) {
-        throw new NotFoundException('Pendencia operacional nao encontrada.');
+    regularizadaEm: Date | null
+  ): Promise<void> {
+    const openOperationalPendencias = await client.pendencia.count({
+      where: {
+        empresaId: companyId,
+        status: StatusPendenciaEnum.ABERTA,
+        tipo: TipoPendenciaEnum.OPERACIONAL
       }
+    });
 
-      const resolvedAt = new Date();
-      const resolvedPendencia = await client.pendenciaOperacional.update({
-        data: {
-          resolvedAt,
-          status: StatusPendenciaOperacional.RESOLVIDA
-        },
-        where: {
-          id: pendencia.id
-        }
-      });
-
-      if (pendencia.tipo === TipoPendenciaOperacional.OPERACIONAL) {
-        await client.empresa.update({
-          data: {
-            pendenciaOperacional: false,
-            regularizadaEm: resolvedAt
-          },
-          where: {
-            id: companyId
-          }
-        });
+    await client.empresa.update({
+      data: {
+        pendenciaOperacional: openOperationalPendencias > 0,
+        regularizadaEm: openOperationalPendencias === 0 ? regularizadaEm : null
+      },
+      where: {
+        id: companyId
       }
-
-      return resolvedPendencia;
     });
   }
+}
+
+function normalizeText(value: string | null | undefined): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeNullableText(
+  value: string | null | undefined
+): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }

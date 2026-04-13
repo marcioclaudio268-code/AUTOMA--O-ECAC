@@ -72,6 +72,36 @@ enum TipoPendenciaOperacional {
   PROCURACAO
 }
 
+enum TipoPendencia {
+  ACESSO
+  OPERACIONAL
+  PROCURACAO
+}
+
+enum StatusPendencia {
+  ABERTA
+  RESOLVIDA
+}
+
+enum PrioridadePendencia {
+  BAIXA
+  MEDIA
+  ALTA
+}
+
+enum TipoLogExecucao {
+  CONFERENCIA_OPERACIONAL
+  REGISTRO_PENDENCIA
+  REGULARIZACAO_PENDENCIA
+  RETIRADA_CARTEIRA
+}
+
+enum ResultadoLogExecucao {
+  SUCESSO
+  SEM_ALTERACAO
+  FALHA
+}
+
 enum RegimeTributario {
   SIMPLES_NACIONAL
   LUCRO_PRESUMIDO
@@ -89,6 +119,9 @@ model UsuarioInterno {
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
   responsaveis  ResponsavelInterno[]
+  pendenciasCriadas Pendencia[] @relation("PendenciaCriadaPor")
+  pendenciasAtualizadas Pendencia[] @relation("PendenciaAtualizadaPor")
+  logsExecucao  LogExecucao[]
 }
 
 model ResponsavelInterno {
@@ -101,6 +134,7 @@ model ResponsavelInterno {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   empresas        Empresa[]
+  pendencias      Pendencia[]
 
   @@index([usuarioInternoId])
 }
@@ -128,6 +162,8 @@ model Empresa {
   updatedAt               DateTime              @updatedAt
   integracoes             IntegracaoEmpresa[]
   pendenciasOperacionais  PendenciaOperacional[]
+  pendencias              Pendencia[]
+  logsExecucao            LogExecucao[]
   varreduras              Varredura[]
   eventosOperacionais     EventoOperacional[]
 
@@ -203,4 +239,59 @@ model PendenciaOperacional {
   @@index([empresaId, status, criticidade])
   @@index([tipo])
   @@index([createdAt])
+}
+
+model Pendencia {
+  id                         String                 @id @default(cuid())
+  empresaId                  String
+  empresa                    Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  responsavelInternoId       String?
+  responsavelInterno         ResponsavelInterno?    @relation(fields: [responsavelInternoId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  tipo                       TipoPendencia
+  status                     StatusPendencia        @default(ABERTA)
+  prioridade                 PrioridadePendencia    @default(MEDIA)
+  titulo                     String
+  descricao                  String                 @db.Text
+  origem                     String?
+  abertaEm                   DateTime               @default(now())
+  fechadaEm                  DateTime?
+  criadaPorUsuarioInternoId   String?
+  criadaPorUsuarioInterno     UsuarioInterno?       @relation("PendenciaCriadaPor", fields: [criadaPorUsuarioInternoId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  atualizadaPorUsuarioInternoId String?
+  atualizadaPorUsuarioInterno UsuarioInterno?       @relation("PendenciaAtualizadaPor", fields: [atualizadaPorUsuarioInternoId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  createdAt                  DateTime               @default(now())
+  updatedAt                  DateTime               @updatedAt
+  logsExecucao               LogExecucao[]
+
+  @@index([empresaId])
+  @@index([status])
+  @@index([prioridade])
+  @@index([responsavelInternoId])
+  @@index([tipo])
+  @@index([abertaEm])
+}
+
+model LogExecucao {
+  id                        String               @id @default(cuid())
+  empresaId                 String
+  empresa                   Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  pendenciaId               String?
+  pendencia                 Pendencia?           @relation(fields: [pendenciaId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  tipo                      TipoLogExecucao
+  resultado                 ResultadoLogExecucao
+  resumo                    String
+  detalhes                  String?              @db.Text
+  executadoPorUsuarioInternoId String?
+  executadoPorUsuarioInterno UsuarioInterno?      @relation(fields: [executadoPorUsuarioInternoId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  executadoEm               DateTime             @default(now())
+  chaveIdempotencia         String?
+  createdAt                 DateTime             @default(now())
+
+  @@index([empresaId])
+  @@index([pendenciaId])
+  @@index([executadoEm])
+  @@index([tipo])
+  @@index([resultado])
+  @@index([executadoPorUsuarioInternoId])
+  @@index([chaveIdempotencia])
 }

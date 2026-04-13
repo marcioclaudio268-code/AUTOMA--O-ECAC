@@ -7,18 +7,22 @@ import { useParams, useRouter } from 'next/navigation';
 import { requireSession, signOut } from '@/lib/auth';
 import {
   executeManualScan,
+  createCompanyPendencia,
   getCompany,
   listEventosOperacionais,
+  listCompanyLogs,
   listCompanyPendencias,
   listResponsaveis,
   listVarreduras,
-  resolveCompanyPendencia,
+  registerCompanyCheck,
+  regularizeCompanyOperationalIssue,
   updateCompany,
   type CompanyCreateInput,
   type CompanyIntegration,
   type CompanyDetailItem,
   type CompanyUpdateInput,
   type EventoOperacionalRecord,
+  type LogExecucaoRecord,
   type PendenciaOperacionalRecord,
   type RegimeTributario,
   type ResponsavelInternoRecord,
@@ -248,6 +252,44 @@ function getPendenciaCriticidadeTone(
   }
 }
 
+function formatLogTypeLabel(value: LogExecucaoRecord['tipo']) {
+  switch (value) {
+    case 'CONFERENCIA_OPERACIONAL':
+      return 'Conferencia operacional';
+    case 'REGISTRO_PENDENCIA':
+      return 'Registro de pendencia';
+    case 'REGULARIZACAO_PENDENCIA':
+      return 'Regularizacao de pendencia';
+    case 'RETIRADA_CARTEIRA':
+    default:
+      return 'Retirada da carteira';
+  }
+}
+
+function formatLogResultLabel(value: LogExecucaoRecord['resultado']) {
+  switch (value) {
+    case 'FALHA':
+      return 'Falha';
+    case 'SEM_ALTERACAO':
+      return 'Sem alteracao';
+    case 'SUCESSO':
+    default:
+      return 'Sucesso';
+  }
+}
+
+function getLogTone(value: LogExecucaoRecord['resultado']): StatusTone {
+  switch (value) {
+    case 'FALHA':
+      return 'danger';
+    case 'SEM_ALTERACAO':
+      return 'neutral';
+    case 'SUCESSO':
+    default:
+      return 'success';
+  }
+}
+
 function getScanTone(
   value: VarreduraRecord['statusExecucao']
 ): StatusTone {
@@ -391,6 +433,7 @@ export default function CompanyDetailPage() {
   const [eventosOperacionais, setEventosOperacionais] = useState<
     EventoOperacionalRecord[]
   >([]);
+  const [logsExecucao, setLogsExecucao] = useState<LogExecucaoRecord[]>([]);
   const [pendenciasOperacionais, setPendenciasOperacionais] = useState<
     PendenciaOperacionalRecord[]
   >([]);
@@ -485,6 +528,18 @@ export default function CompanyDetailPage() {
           }
 
           try {
+            const logs = await listCompanyLogs(companyId);
+
+            if (active) {
+              setLogsExecucao(logs);
+            }
+          } catch {
+            if (active) {
+              setLogsExecucao([]);
+            }
+          }
+
+          try {
             const pendencias = await listCompanyPendencias(
               companyId,
               buildPendenciaFilters('TODAS', 'TODAS')
@@ -575,12 +630,46 @@ export default function CompanyDetailPage() {
       const updated = await updateCompany(companyId, payload);
       setCompany(updated);
       setForm(toFormState(updated));
+      await refreshOperationalData();
       setMessage(successMessage);
     } catch (submitError) {
       setError(
         submitError instanceof Error
           ? submitError.message
           : 'Falha ao atualizar empresa.'
+      );
+    } finally {
+      submitLockRef.current = false;
+      setIsSaving(false);
+      setActiveQuickAction(null);
+    }
+  }
+
+  async function runOperationalAction(
+    action: OperationalQuickAction,
+    run: () => Promise<unknown>,
+    successMessage: string
+  ) {
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
+    setIsSaving(true);
+    setActiveQuickAction(action);
+    setError('');
+    setMessage('');
+    setFlashMessage('');
+
+    try {
+      await run();
+      await refreshOperationalData();
+      setMessage(successMessage);
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Falha ao executar acao operacional.'
       );
     } finally {
       submitLockRef.current = false;
@@ -613,16 +702,17 @@ export default function CompanyDetailPage() {
   }
 
   async function handleQuickAction(action: OperationalQuickAction) {
-    const now = new Date().toISOString();
+    if (!companyId) {
+      setError('Empresa invalida.');
+      return;
+    }
 
     switch (action) {
       case 'registrarConferencia':
-        await persistCompanyUpdate(
-          {
-            ultimaConferenciaOperacionalEm: now
-          },
-          'Conferencia operacional registrada agora.',
-          action
+        await runOperationalAction(
+          action,
+          () => registerCompanyCheck(companyId),
+          'Conferencia operacional registrada agora.'
         );
         break;
       case 'marcarAcessoDisponivel':
@@ -644,23 +734,17 @@ export default function CompanyDetailPage() {
         );
         break;
       case 'regularizarPendenciaOperacional':
-        await persistCompanyUpdate(
-          {
-            pendenciaOperacional: false,
-            regularizadaEm: now
-          },
-          'Pendencia operacional regularizada.',
-          action
+        await runOperationalAction(
+          action,
+          () => regularizeCompanyOperationalIssue(companyId),
+          'Pendencia operacional regularizada.'
         );
         break;
       case 'reabrirPendenciaOperacional':
-        await persistCompanyUpdate(
-          {
-            pendenciaOperacional: true,
-            regularizadaEm: null
-          },
-          'Pendencia operacional reaberta.',
-          action
+        await runOperationalAction(
+          action,
+          () => createCompanyPendencia(companyId),
+          'Pendencia operacional registrada.'
         );
         break;
     }
@@ -688,6 +772,13 @@ export default function CompanyDetailPage() {
       setEventosOperacionais(events);
     } catch {
       setEventosOperacionais([]);
+    }
+
+    try {
+      const logs = await listCompanyLogs(companyId);
+      setLogsExecucao(logs);
+    } catch {
+      setLogsExecucao([]);
     }
 
     try {
@@ -754,7 +845,7 @@ export default function CompanyDetailPage() {
         throw new Error('Empresa invalida.');
       }
 
-      await resolveCompanyPendencia(companyId, pendenciaId);
+      await regularizeCompanyOperationalIssue(companyId, { pendenciaId });
       await refreshOperationalData();
       setMessage('Pendencia operacional resolvida.');
     } catch (resolveError) {
@@ -1378,6 +1469,70 @@ export default function CompanyDetailPage() {
                         <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
                           {event.descricao}
                         </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Historico operacional
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Ultimos registros persistidos de conferencia, pendencia e
+                      retirada.
+                    </p>
+                  </div>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    {logsExecucao.length} registro(s)
+                  </span>
+                </div>
+                {logsExecucao.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
+                    Nenhum log operacional recente registrado.
+                  </p>
+                ) : (
+                  <ul className="space-y-3">
+                    {logsExecucao.map((log) => (
+                      <li
+                        className="rounded-2xl border border-slate-200 bg-white p-4"
+                        key={log.id}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold text-slate-900">
+                              {formatLogTypeLabel(log.tipo)}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {formatDateTime(log.executadoEm)}
+                              {' - '}
+                              {log.executadoPorUsuarioInternoNome}
+                            </p>
+                          </div>
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                              getLogTone(log.resultado)
+                            )}`}
+                          >
+                            {formatLogResultLabel(log.resultado)}
+                          </span>
+                        </div>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                          {log.resumo}
+                        </p>
+                        {log.detalhes ? (
+                          <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-500">
+                            {log.detalhes}
+                          </p>
+                        ) : null}
+                        {log.pendenciaTitulo ? (
+                          <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-500">
+                            Pendencia relacionada: {log.pendenciaTitulo}
+                          </p>
+                        ) : null}
                       </li>
                     ))}
                   </ul>

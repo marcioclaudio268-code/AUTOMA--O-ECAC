@@ -13,12 +13,16 @@ import { Module, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import {
-  CriticidadePendenciaOperacional,
   PerfilUsuario,
   PrismaClient,
+  PrioridadePendencia,
   RegimeTributario,
+  ResultadoLogExecucao,
   StatusAcessoEmpresa,
-  StatusProcuracaoEmpresa
+  StatusProcuracaoEmpresa,
+  StatusPendencia,
+  TipoLogExecucao,
+  TipoPendencia
 } from '@prisma/client';
 import EmbeddedPostgres from 'embedded-postgres';
 import * as bcrypt from 'bcrypt';
@@ -27,8 +31,9 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 const TEST_TIMEOUT = 120_000;
 const ADMIN_EMAIL = 'admin@ecac.local';
 const ADMIN_PASSWORD = 'admin123';
-const JWT_SECRET = 'company-pendencias-integration-secret';
-const TEST_DATABASE_NAME = 'ecac_automacao_company_pendencias_integration';
+const JWT_SECRET = 'company-traceability-integration-secret';
+const TEST_DATABASE_NAME =
+  'ecac_automacao_company_traceability_integration';
 const API_ROOT = process.cwd();
 const requireFromApi = createRequire(path.join(API_ROOT, 'package.json'));
 
@@ -40,9 +45,12 @@ type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH';
 };
 
-type SeededCompanyPendenciasData = {
-  empresaIrregularId: string;
-  empresaRegularId: string;
+type SeededCompanyTraceabilityData = {
+  empresaCheckId: string;
+  empresaCreateId: string;
+  empresaRegularizeId: string;
+  empresaRemoveId: string;
+  pendenciaRegularizeId: string;
 };
 
 let postgres: EmbeddedPostgres;
@@ -52,11 +60,11 @@ let baseUrl = '';
 let sessionCookie = '';
 let tempRoot = '';
 let postgresPort = 0;
-let seededData: SeededCompanyPendenciasData;
+let seededData: SeededCompanyTraceabilityData;
 
 beforeAll(async () => {
   tempRoot = await mkdtemp(
-    path.join(os.tmpdir(), 'ecac-automacao-company-pendencias-it-')
+    path.join(os.tmpdir(), 'ecac-automacao-company-traceability-it-')
   );
   const databaseDir = path.join(tempRoot, 'postgres');
   postgresPort = await getFreePort();
@@ -80,11 +88,10 @@ beforeAll(async () => {
   runPrismaMigrateDeploy();
   runBackendBuild();
 
-  const [authModule, scansModule, pendenciasModule] = (await Promise.all([
+  const [authModule, companiesModule] = (await Promise.all([
     importModuleFromDist('modules/auth/auth.module.js'),
-    importModuleFromDist('modules/scans/scans.module.js'),
-    importModuleFromDist('modules/pendencias/pendencias.module.js')
-  ])) as [AnyModuleNamespace, AnyModuleNamespace, AnyModuleNamespace];
+    importModuleFromDist('modules/companies/companies.module.js')
+  ])) as [AnyModuleNamespace, AnyModuleNamespace];
 
   const IntegrationTestModule = class IntegrationTestModule {};
   Module({
@@ -94,13 +101,12 @@ beforeAll(async () => {
         isGlobal: true
       }),
       authModule.AuthModule,
-      scansModule.ScansModule,
-      pendenciasModule.PendenciasModule
+      companiesModule.CompaniesModule
     ]
   })(IntegrationTestModule);
 
   prisma = new PrismaClient();
-  seededData = await seedCompanyPendenciasData(prisma);
+  seededData = await seedCompanyTraceabilityData(prisma);
 
   app = await NestFactory.create(IntegrationTestModule, {
     logger: ['error']
@@ -135,165 +141,42 @@ afterAll(async () => {
   }
 }, TEST_TIMEOUT);
 
-describe('pendencias operacionais persistidas local', () => {
-  test('varredura manual cria pendencias abertas para achado relevante', async () => {
-    const scanResponse = await requestJson(
-      `/companies/${seededData.empresaIrregularId}/scans/manual`,
+describe('rastreabilidade operacional da empresa', () => {
+  test('registrar pendencia cria Pendencia e LogExecucao e marca a empresa como pendente', async () => {
+    const response = await requestJson(
+      `/companies/${seededData.empresaCreateId}/pendencias`,
       {
+        body: {
+          descricao: 'Pendencia operacional criada via API.',
+          origem: 'CARTEIRA',
+          prioridade: PrioridadePendencia.ALTA,
+          tipo: TipoPendencia.OPERACIONAL,
+          titulo: 'Pendencia operacional manual'
+        },
         cookie: sessionCookie,
         method: 'POST'
       }
     );
 
-    expect(scanResponse.response.status).toBe(201);
+    expect(response.response.status).toBe(201);
 
-    const pendenciasResponse = await requestJson(
-      `/companies/${seededData.empresaIrregularId}/pendencias`,
-      {
-        cookie: sessionCookie
-      }
-    );
-
-    expect(pendenciasResponse.response.status).toBe(200);
-    const pendencias = pendenciasResponse.body as Array<{
-      createdAt: string;
-      criticidade: string;
-      descricao: string;
+    const pendencia = response.body as {
+      empresaId: string;
+      fechadaEm: string | null;
       id: string;
-      origem: string | null;
-      resolvedAt: string | null;
-      status: string;
-      tipo: string;
-    }>;
+      prioridade: PrioridadePendencia;
+      responsavelInternoId: string | null;
+      status: StatusPendencia;
+      tipo: TipoPendencia;
+    };
 
-    expect(pendencias).toHaveLength(3);
-    expect(
-      pendencias.map((pendencia) => pendencia.tipo)
-    ).toEqual(expect.arrayContaining(['ACESSO', 'OPERACIONAL', 'PROCURACAO']));
-    expect(
-      pendencias.every((pendencia) => pendencia.status === 'ABERTA')
-    ).toBe(true);
-    expect(
-      pendencias.every((pendencia) => pendencia.resolvedAt === null)
-    ).toBe(true);
-    expect(
-      pendencias.some((pendencia) =>
-        pendencia.descricao.includes('Acesso irregular')
-      )
-    ).toBe(true);
-    expect(
-      pendencias.some((pendencia) =>
-        pendencia.descricao.includes('Procuracao irregular')
-      )
-    ).toBe(true);
-    expect(
-      pendencias.some((pendencia) =>
-        pendencia.descricao.includes('Pendencia operacional manual')
-      )
-    ).toBe(true);
-    expect(
-      pendencias.find((pendencia) => pendencia.tipo === 'ACESSO')?.criticidade
-    ).toBe(CriticidadePendenciaOperacional.ALTA);
-    expect(
-      pendencias
-        .find((pendencia) => pendencia.tipo === 'PROCURACAO')
-        ?.criticidade
-    ).toBe(CriticidadePendenciaOperacional.MEDIA);
-    expect(
-      pendencias
-        .find((pendencia) => pendencia.tipo === 'OPERACIONAL')
-        ?.criticidade
-    ).toBe(CriticidadePendenciaOperacional.ALTA);
-  }, TEST_TIMEOUT);
-
-  test('nao duplica pendencia aberta em varredura repetida', async () => {
-    const firstScan = await requestJson(
-      `/companies/${seededData.empresaIrregularId}/scans/manual`,
-      {
-        cookie: sessionCookie,
-        method: 'POST'
-      }
-    );
-
-    expect(firstScan.response.status).toBe(201);
-
-    const secondScan = await requestJson(
-      `/companies/${seededData.empresaIrregularId}/scans/manual`,
-      {
-        cookie: sessionCookie,
-        method: 'POST'
-      }
-    );
-
-    expect(secondScan.response.status).toBe(201);
-
-    const pendenciasResponse = await requestJson(
-      `/companies/${seededData.empresaIrregularId}/pendencias?take=10`,
-      {
-        cookie: sessionCookie
-      }
-    );
-
-    expect(pendenciasResponse.response.status).toBe(200);
-    const pendencias = pendenciasResponse.body as Array<{
-      status: string;
-      tipo: string;
-    }>;
-
-    expect(pendencias).toHaveLength(3);
-    expect(
-      pendencias.filter((pendencia) => pendencia.status === 'ABERTA')
-    ).toHaveLength(3);
-    expect(
-      pendencias.map((pendencia) => pendencia.tipo)
-    ).toEqual(expect.arrayContaining(['ACESSO', 'OPERACIONAL', 'PROCURACAO']));
-  }, TEST_TIMEOUT);
-
-  test('resolve pendencia operacional e atualiza a empresa', async () => {
-    await requestJson(
-      `/companies/${seededData.empresaIrregularId}/scans/manual`,
-      {
-        cookie: sessionCookie,
-        method: 'POST'
-      }
-    );
-
-    const pendenciasResponse = await requestJson(
-      `/companies/${seededData.empresaIrregularId}/pendencias`,
-      {
-        cookie: sessionCookie
-      }
-    );
-
-    const pendencias = pendenciasResponse.body as Array<{
-      id: string;
-      resolvedAt: string | null;
-      status: string;
-      tipo: string;
-    }>;
-
-    const pendenciaOperacional = pendencias.find(
-      (pendencia) => pendencia.tipo === 'OPERACIONAL'
-    );
-
-    expect(pendenciaOperacional).toBeTruthy();
-
-    const resolveResponse = await requestJson(
-      `/companies/${seededData.empresaIrregularId}/pendencias/${pendenciaOperacional?.id}/resolver`,
-      {
-        cookie: sessionCookie,
-        method: 'PATCH'
-      }
-    );
-
-    expect(resolveResponse.response.status).toBe(200);
-    expect(resolveResponse.body).toMatchObject({
-      id: pendenciaOperacional?.id,
-      status: 'RESOLVIDA'
+    expect(pendencia).toMatchObject({
+      empresaId: seededData.empresaCreateId,
+      prioridade: PrioridadePendencia.ALTA,
+      status: StatusPendencia.ABERTA,
+      tipo: TipoPendencia.OPERACIONAL
     });
-    expect(
-      (resolveResponse.body as { resolvedAt?: string | null }).resolvedAt
-    ).not.toBeNull();
+    expect(pendencia.fechadaEm).toBeNull();
 
     const empresa = await prisma.empresa.findUnique({
       select: {
@@ -301,7 +184,153 @@ describe('pendencias operacionais persistidas local', () => {
         regularizadaEm: true
       },
       where: {
-        id: seededData.empresaIrregularId
+        id: seededData.empresaCreateId
+      }
+    });
+
+    expect(empresa).toMatchObject({
+      pendenciaOperacional: true,
+      regularizadaEm: null
+    });
+
+    const pendencias = await prisma.pendencia.findMany({
+      where: {
+        empresaId: seededData.empresaCreateId
+      }
+    });
+    expect(pendencias).toHaveLength(1);
+    expect(pendencias[0]?.status).toBe(StatusPendencia.ABERTA);
+
+    const logs = await prisma.logExecucao.findMany({
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        empresaId: seededData.empresaCreateId
+      }
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      pendenciaId: pendencia.id,
+      resultado: ResultadoLogExecucao.SUCESSO,
+      tipo: TipoLogExecucao.REGISTRO_PENDENCIA
+    });
+
+    const logsResponse = await requestJson(
+      `/companies/${seededData.empresaCreateId}/logs`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(logsResponse.response.status).toBe(200);
+    expect(logsResponse.body).toHaveLength(1);
+    expect(
+      (logsResponse.body as Array<{ tipo: string }>)[0]?.tipo
+    ).toBe(TipoLogExecucao.REGISTRO_PENDENCIA);
+
+    const historyResponse = await requestJson(
+      `/companies/${seededData.empresaCreateId}/operational-history`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(historyResponse.response.status).toBe(200);
+    expect(historyResponse.body).toMatchObject({
+      empresaId: seededData.empresaCreateId
+    });
+    expect(
+      (historyResponse.body as { logs: unknown[]; pendencias: unknown[] }).logs
+    ).toHaveLength(1);
+    expect(
+      (historyResponse.body as { logs: unknown[]; pendencias: unknown[] })
+        .pendencias
+    ).toHaveLength(1);
+  }, TEST_TIMEOUT);
+
+  test('conferir agora grava LogExecucao e atualiza ultimaConferenciaOperacionalEm', async () => {
+    const response = await requestJson(
+      `/companies/${seededData.empresaCheckId}/operational/check`,
+      {
+        body: {
+          chaveIdempotencia: 'company-check'
+        },
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(response.response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      updatedAt: expect.any(String)
+    });
+
+    const empresa = await prisma.empresa.findUnique({
+      select: {
+        ultimaConferenciaOperacionalEm: true
+      },
+      where: {
+        id: seededData.empresaCheckId
+      }
+    });
+
+    expect(empresa?.ultimaConferenciaOperacionalEm).not.toBeNull();
+    expect(
+      empresa?.ultimaConferenciaOperacionalEm?.toISOString()
+    ).toBe((response.body as { updatedAt: string }).updatedAt);
+
+    const logs = await prisma.logExecucao.findMany({
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        empresaId: seededData.empresaCheckId
+      }
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      resultado: ResultadoLogExecucao.SUCESSO,
+      tipo: TipoLogExecucao.CONFERENCIA_OPERACIONAL
+    });
+  }, TEST_TIMEOUT);
+
+  test('regularizar pendencia fecha Pendencia, grava LogExecucao e ajusta o resumo da empresa', async () => {
+    const response = await requestJson(
+      `/companies/${seededData.empresaRegularizeId}/operational/regularize`,
+      {
+        body: {
+          pendenciaId: seededData.pendenciaRegularizeId
+        },
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(response.response.status).toBe(201);
+    const pendencia = response.body as {
+      fechadaEm: string | null;
+      id: string;
+      status: StatusPendencia;
+      tipo: TipoPendencia;
+    };
+
+    expect(pendencia).toMatchObject({
+      id: seededData.pendenciaRegularizeId,
+      status: StatusPendencia.RESOLVIDA,
+      tipo: TipoPendencia.OPERACIONAL
+    });
+    expect(pendencia.fechadaEm).not.toBeNull();
+
+    const empresa = await prisma.empresa.findUnique({
+      select: {
+        pendenciaOperacional: true,
+        regularizadaEm: true
+      },
+      where: {
+        id: seededData.empresaRegularizeId
       }
     });
 
@@ -309,85 +338,83 @@ describe('pendencias operacionais persistidas local', () => {
       pendenciaOperacional: false
     });
     expect(empresa?.regularizadaEm).not.toBeNull();
+
+    const pendenciaPersistida = await prisma.pendencia.findUnique({
+      where: {
+        id: seededData.pendenciaRegularizeId
+      }
+    });
+
+    expect(pendenciaPersistida).toMatchObject({
+      status: StatusPendencia.RESOLVIDA
+    });
+    expect(pendenciaPersistida?.fechadaEm).not.toBeNull();
+
+    const logs = await prisma.logExecucao.findMany({
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        empresaId: seededData.empresaRegularizeId
+      }
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      pendenciaId: seededData.pendenciaRegularizeId,
+      resultado: ResultadoLogExecucao.SUCESSO,
+      tipo: TipoLogExecucao.REGULARIZACAO_PENDENCIA
+    });
   }, TEST_TIMEOUT);
 
-  test('filtra pendencias por status e criticidade', async () => {
-    await requestJson(
-      `/companies/${seededData.empresaIrregularId}/scans/manual`,
+  test('retirar da carteira grava LogExecucao e ajusta naCarteira', async () => {
+    const response = await requestJson(
+      `/companies/${seededData.empresaRemoveId}/operational/remove-from-wallet`,
       {
+        body: {
+          chaveIdempotencia: 'company-remove'
+        },
         cookie: sessionCookie,
         method: 'POST'
       }
     );
 
-    const pendenciasAltaResponse = await requestJson(
-      `/companies/${seededData.empresaIrregularId}/pendencias?criticidade=ALTA`,
-      {
-        cookie: sessionCookie
+    expect(response.response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      updatedAt: expect.any(String)
+    });
+
+    const empresa = await prisma.empresa.findUnique({
+      select: {
+        naCarteira: true
+      },
+      where: {
+        id: seededData.empresaRemoveId
       }
-    );
+    });
 
-    expect(pendenciasAltaResponse.response.status).toBe(200);
-    expect(pendenciasAltaResponse.body).toHaveLength(2);
-    expect(
-      (pendenciasAltaResponse.body as Array<{ tipo: string }>).map(
-        (pendencia) => pendencia.tipo
-      )
-    ).toEqual(expect.arrayContaining(['ACESSO', 'OPERACIONAL']));
+    expect(empresa?.naCarteira).toBe(false);
 
-    const pendenciasResolvidasResponse = await requestJson(
-      `/companies/${seededData.empresaIrregularId}/pendencias?status=RESOLVIDA`,
-      {
-        cookie: sessionCookie
+    const logs = await prisma.logExecucao.findMany({
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        empresaId: seededData.empresaRemoveId
       }
-    );
+    });
 
-    expect(pendenciasResolvidasResponse.response.status).toBe(200);
-    expect(pendenciasResolvidasResponse.body).toHaveLength(1);
-    expect(
-      (pendenciasResolvidasResponse.body as Array<{ tipo: string }>)[0]?.tipo
-    ).toBe('OPERACIONAL');
-
-    const pendenciasMediaResponse = await requestJson(
-      `/companies/${seededData.empresaIrregularId}/pendencias?status=ABERTA&criticidade=MEDIA`,
-      {
-        cookie: sessionCookie
-      }
-    );
-
-    expect(pendenciasMediaResponse.response.status).toBe(200);
-    expect(pendenciasMediaResponse.body).toHaveLength(1);
-    expect(
-      (pendenciasMediaResponse.body as Array<{ tipo: string }>)[0]?.tipo
-    ).toBe('PROCURACAO');
-  }, TEST_TIMEOUT);
-
-  test('nao cria pendencia para empresa regular', async () => {
-    const scanResponse = await requestJson(
-      `/companies/${seededData.empresaRegularId}/scans/manual`,
-      {
-        cookie: sessionCookie,
-        method: 'POST'
-      }
-    );
-
-    expect(scanResponse.response.status).toBe(201);
-
-    const pendenciasResponse = await requestJson(
-      `/companies/${seededData.empresaRegularId}/pendencias`,
-      {
-        cookie: sessionCookie
-      }
-    );
-
-    expect(pendenciasResponse.response.status).toBe(200);
-    expect(pendenciasResponse.body).toEqual([]);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      resultado: ResultadoLogExecucao.SUCESSO,
+      tipo: TipoLogExecucao.RETIRADA_CARTEIRA
+    });
   }, TEST_TIMEOUT);
 });
 
-async function seedCompanyPendenciasData(
+async function seedCompanyTraceabilityData(
   database: PrismaClient
-): Promise<SeededCompanyPendenciasData> {
+): Promise<SeededCompanyTraceabilityData> {
   const adminSenhaHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
 
   const admin = await database.usuarioInterno.create({
@@ -403,33 +430,33 @@ async function seedCompanyPendenciasData(
   const responsavel = await database.responsavelInterno.create({
     data: {
       ativo: true,
-      email: 'responsavel.pendencias@ecac.local',
-      nome: 'Responsavel Pendencias',
+      email: 'responsavel.traceabilidade@ecac.local',
+      nome: 'Responsavel Traceabilidade',
       usuarioInternoId: admin.id
     }
   });
 
-  const empresaIrregular = await database.empresa.create({
+  const empresaCreate = await database.empresa.create({
     data: {
-      cnpj: '88888888000108',
+      cnpj: '11111111000191',
       naCarteira: true,
-      nomeFantasia: 'Pendencias Irregular',
-      pendenciaOperacional: true,
-      razaoSocial: 'Empresa Pendencias Irregular Ltda',
+      nomeFantasia: 'Empresa Criar Pendencia',
+      pendenciaOperacional: false,
+      razaoSocial: 'Empresa Criar Pendencia Ltda',
       regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
       responsavelInternoId: responsavel.id,
-      statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
-      statusProcuracao: StatusProcuracaoEmpresa.PENDENTE
+      statusAcesso: StatusAcessoEmpresa.DISPONIVEL,
+      statusProcuracao: StatusProcuracaoEmpresa.VALIDA
     }
   });
 
-  const empresaRegular = await database.empresa.create({
+  const empresaCheck = await database.empresa.create({
     data: {
-      cnpj: '99999999000199',
+      cnpj: '22222222000172',
       naCarteira: true,
-      nomeFantasia: 'Pendencias Regular',
+      nomeFantasia: 'Empresa Conferencia',
       pendenciaOperacional: false,
-      razaoSocial: 'Empresa Pendencias Regular Ltda',
+      razaoSocial: 'Empresa Conferencia Ltda',
       regimeTributario: RegimeTributario.LUCRO_PRESUMIDO,
       responsavelInternoId: responsavel.id,
       statusAcesso: StatusAcessoEmpresa.DISPONIVEL,
@@ -437,9 +464,54 @@ async function seedCompanyPendenciasData(
     }
   });
 
+  const empresaRegularize = await database.empresa.create({
+    data: {
+      cnpj: '33333333000163',
+      naCarteira: true,
+      nomeFantasia: 'Empresa Regularizacao',
+      pendenciaOperacional: true,
+      razaoSocial: 'Empresa Regularizacao Ltda',
+      regimeTributario: RegimeTributario.LUCRO_REAL,
+      responsavelInternoId: responsavel.id,
+      statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
+      statusProcuracao: StatusProcuracaoEmpresa.PENDENTE
+    }
+  });
+
+  const pendenciaRegularize = await database.pendencia.create({
+    data: {
+      abertaEm: new Date('2026-04-01T10:00:00.000Z'),
+      descricao: 'Pendencia operacional aberta para regularizacao.',
+      empresaId: empresaRegularize.id,
+      origem: 'MANUAL',
+      prioridade: PrioridadePendencia.ALTA,
+      responsavelInternoId: responsavel.id,
+      status: StatusPendencia.ABERTA,
+      tipo: TipoPendencia.OPERACIONAL,
+      titulo: 'Pendencia operacional manual'
+    }
+  });
+
+  const empresaRemove = await database.empresa.create({
+    data: {
+      cnpj: '44444444000154',
+      naCarteira: true,
+      nomeFantasia: 'Empresa Remocao',
+      pendenciaOperacional: false,
+      razaoSocial: 'Empresa Remocao Ltda',
+      regimeTributario: RegimeTributario.OUTRO,
+      responsavelInternoId: responsavel.id,
+      statusAcesso: StatusAcessoEmpresa.DISPONIVEL,
+      statusProcuracao: StatusProcuracaoEmpresa.VALIDA
+    }
+  });
+
   return {
-    empresaIrregularId: empresaIrregular.id,
-    empresaRegularId: empresaRegular.id
+    empresaCheckId: empresaCheck.id,
+    empresaCreateId: empresaCreate.id,
+    empresaRegularizeId: empresaRegularize.id,
+    empresaRemoveId: empresaRemove.id,
+    pendenciaRegularizeId: pendenciaRegularize.id
   };
 }
 

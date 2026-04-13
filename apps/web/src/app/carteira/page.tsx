@@ -5,10 +5,13 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
 import {
+  createCompanyPendencia,
+  getCompany,
   listCarteira,
   listResponsaveis,
-  updateCompany,
-  type CompanyUpdateInput,
+  registerCompanyCheck,
+  regularizeCompanyOperationalIssue,
+  removeCompanyFromWallet,
   type CompanyDetailItem,
   type CompanyListItem,
   type ResponsavelInternoRecord,
@@ -231,10 +234,25 @@ export default function CarteiraPage() {
     await refreshCarteira(initialFilters);
   }
 
-  async function mutateCompany(
+  async function refreshCompanyInCarteira(
+    companyId: string,
+    successMessage: string,
+    removeFromList = false
+  ) {
+    const updated = await getCompany(companyId);
+
+    setCarteira((current) =>
+      removeFromList || !updated.naCarteira
+        ? current.filter((item) => item.id !== companyId)
+        : upsertCarteiraItem(current, toCarteiraItem(updated), filters)
+    );
+    setMessage(successMessage);
+  }
+
+  async function runCompanyAction(
     company: CompanyListItem,
     action: string,
-    payload: CompanyUpdateInput,
+    run: () => Promise<unknown>,
     successMessage: string,
     removeFromList = false
   ) {
@@ -248,19 +266,17 @@ export default function CarteiraPage() {
     setIsMutatingAction(action);
 
     try {
-      const updated = await updateCompany(company.id, payload);
-
-      setCarteira((current) =>
+      await run();
+      await refreshCompanyInCarteira(
+        company.id,
+        successMessage,
         removeFromList
-          ? current.filter((item) => item.id !== company.id)
-          : upsertCarteiraItem(current, toCarteiraItem(updated), filters)
       );
-      setMessage(successMessage);
     } catch (submitError) {
       setError(
         submitError instanceof Error
           ? submitError.message
-          : 'Falha ao atualizar empresa.'
+          : 'Falha ao executar acao operacional.'
       );
     } finally {
       setIsMutatingId('');
@@ -269,45 +285,38 @@ export default function CarteiraPage() {
   }
 
   async function handleStampConference(company: CompanyListItem) {
-    await mutateCompany(
+    await runCompanyAction(
       company,
       'conference',
-      {
-        ultimaConferenciaOperacionalEm: new Date().toISOString()
-      },
+      () => registerCompanyCheck(company.id),
       'Conferencia operacional registrada.'
     );
   }
 
   async function handleTogglePendencia(company: CompanyListItem) {
-    const now = new Date().toISOString();
+    if (company.pendenciaOperacional) {
+      await runCompanyAction(
+        company,
+        'regularize',
+        () => regularizeCompanyOperationalIssue(company.id),
+        'Empresa regularizada.'
+      );
+      return;
+    }
 
-    await mutateCompany(
+    await runCompanyAction(
       company,
-      company.pendenciaOperacional ? 'regularize' : 'pending',
-      company.pendenciaOperacional
-        ? {
-            pendenciaOperacional: false,
-            regularizadaEm: now,
-            ultimaConferenciaOperacionalEm: now
-          }
-        : {
-            pendenciaOperacional: true,
-            ultimaConferenciaOperacionalEm: now
-          },
-      company.pendenciaOperacional
-        ? 'Empresa regularizada.'
-        : 'Pendencia operacional registrada.'
+      'pending',
+      () => createCompanyPendencia(company.id),
+      'Pendencia operacional registrada.'
     );
   }
 
   async function handleRemove(company: CompanyListItem) {
-    await mutateCompany(
+    await runCompanyAction(
       company,
       'remove',
-      {
-        naCarteira: false
-      },
+      () => removeCompanyFromWallet(company.id),
       'Empresa retirada da carteira.',
       true
     );
