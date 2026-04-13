@@ -6,6 +6,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { LogsService } from '../logs/logs.service';
+import { ListCompanyLogsQueryDto } from '../logs/dto/list-company-logs-query.dto';
 import { CreatePendenciaDto } from './dto/create-pendencia.dto';
 import { ListCompanyPendenciasQueryDto } from './dto/list-company-pendencias-query.dto';
 import { ListPendenciasQueryDto } from './dto/list-pendencias-query.dto';
@@ -13,13 +14,17 @@ import { UpdatePendenciaDto } from './dto/update-pendencia.dto';
 import {
   mapPendenciaRecord,
   pendenciaInclude,
+  sortPendenciasBy,
   sortPendencias,
   type PendenciaWithRelations
 } from './pendencias.mappers';
 import {
+  type LogExecucaoRecord,
+  PendenciaSortByEnum,
   type PendenciaRecord,
   PrioridadePendenciaEnum,
   ResultadoLogExecucaoEnum,
+  SortDirectionEnum,
   StatusPendenciaEnum,
   TipoLogExecucaoEnum,
   TipoPendenciaEnum
@@ -165,19 +170,22 @@ export class PendenciasService {
   ): Promise<PendenciaRecord[]> {
     const pendencias = await this.prisma.pendencia.findMany({
       include: pendenciaInclude,
-      orderBy: [
-        {
-          status: 'asc'
-        },
-        {
-          abertaEm: 'desc'
-        }
-      ],
-      take: query.take ?? 100,
       where: this.buildListWhere(query)
     });
 
-    return pendencias.map(mapPendenciaRecord).sort(sortPendencias);
+    const records = pendencias.map(mapPendenciaRecord).sort((left, right) =>
+      sortPendenciasBy(
+        left,
+        right,
+        query.sortBy ?? PendenciaSortByEnum.PRIORIDADE,
+        query.sortDirection ?? SortDirectionEnum.ASC
+      )
+    );
+    const take = query.take ?? 12;
+    const page = query.page ?? 1;
+    const startIndex = (page - 1) * take;
+
+    return records.slice(startIndex, startIndex + take);
   }
 
   async listCompanyPendencias(
@@ -216,6 +224,14 @@ export class PendenciasService {
     }
 
     return mapPendenciaRecord(pendencia as PendenciaWithRelations);
+  }
+
+  async listPendenciaLogs(
+    id: string,
+    query: ListCompanyLogsQueryDto = {}
+  ): Promise<LogExecucaoRecord[]> {
+    await this.findOne(id);
+    return this.logsService.listPendenciaLogs(id, query);
   }
 
   async createCompanyPendencia(

@@ -11,10 +11,11 @@ import {
 
 import { JwtCookieAuthGuard } from '../auth/guards/jwt-cookie-auth.guard';
 import type { AuthenticatedRequest } from '../auth/auth.types';
+import { ListCompanyLogsQueryDto } from '../logs/dto/list-company-logs-query.dto';
 import { UpdatePendenciaDto } from './dto/update-pendencia.dto';
 import { ListPendenciasQueryDto } from './dto/list-pendencias-query.dto';
 import { PendenciasService } from './pendencias.service';
-import { PendenciaRecord } from './pendencias.types';
+import { LogExecucaoRecord, PendenciaRecord } from './pendencias.types';
 
 @UseGuards(JwtCookieAuthGuard)
 @Controller('pendencias')
@@ -29,6 +30,14 @@ export class PendenciasController {
   @Get(':id')
   findOne(@Param('id') id: string): Promise<PendenciaRecord> {
     return this.pendenciasService.findOne(id);
+  }
+
+  @Get(':id/logs')
+  listLogs(
+    @Param('id') id: string,
+    @Query() query: ListCompanyLogsQueryDto
+  ): Promise<LogExecucaoRecord[]> {
+    return this.pendenciasService.listPendenciaLogs(id, query);
   }
 
   @Patch(':id')

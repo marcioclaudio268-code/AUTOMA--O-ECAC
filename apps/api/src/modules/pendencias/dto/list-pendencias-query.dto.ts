@@ -2,7 +2,9 @@ import { Transform } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 import {
+  PendenciaSortByEnum,
   PrioridadePendenciaEnum,
+  SortDirectionEnum,
   StatusPendenciaEnum,
   TipoPendenciaEnum
 } from '../pendencias.types';
@@ -17,6 +19,15 @@ function parseOptionalText(value: unknown): string | undefined {
 }
 
 export class ListPendenciasQueryDto {
+  @Transform(({ value }) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  page?: number;
+
   @Transform(({ value }) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : undefined;
@@ -56,4 +67,14 @@ export class ListPendenciasQueryDto {
   @IsOptional()
   @IsEnum(PrioridadePendenciaEnum)
   criticidade?: (typeof PrioridadePendenciaEnum)[keyof typeof PrioridadePendenciaEnum];
+
+  @Transform(({ value }) => parseOptionalText(value))
+  @IsOptional()
+  @IsEnum(PendenciaSortByEnum)
+  sortBy?: (typeof PendenciaSortByEnum)[keyof typeof PendenciaSortByEnum];
+
+  @Transform(({ value }) => parseOptionalText(value))
+  @IsOptional()
+  @IsEnum(SortDirectionEnum)
+  sortDirection?: (typeof SortDirectionEnum)[keyof typeof SortDirectionEnum];
 }
