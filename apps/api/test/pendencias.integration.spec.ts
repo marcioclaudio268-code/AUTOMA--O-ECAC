@@ -15,21 +15,22 @@ import { NestFactory } from '@nestjs/core';
 import {
   PerfilUsuario,
   PrismaClient,
+  PrioridadePendencia,
   RegimeTributario,
   StatusAcessoEmpresa,
-  StatusProcuracaoEmpresa
+  StatusPendencia,
+  StatusProcuracaoEmpresa,
+  TipoPendencia
 } from '@prisma/client';
 import EmbeddedPostgres from 'embedded-postgres';
 import * as bcrypt from 'bcrypt';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
-import { SEM_RESPONSAVEL_LABEL } from '../src/modules/pendencias/pendencias.types';
-
 const TEST_TIMEOUT = 120_000;
 const ADMIN_EMAIL = 'admin@ecac.local';
 const ADMIN_PASSWORD = 'admin123';
-const JWT_SECRET = 'pendencias-integration-secret';
-const TEST_DATABASE_NAME = 'ecac_automacao_pendencias_integration';
+const JWT_SECRET = 'pendencias-filter-integration-secret';
+const TEST_DATABASE_NAME = 'ecac_automacao_pendencias_filter_integration';
 const API_ROOT = process.cwd();
 const requireFromApi = createRequire(path.join(API_ROOT, 'package.json'));
 
@@ -42,10 +43,12 @@ type RequestOptions = {
 };
 
 type SeededPendenciasData = {
-  empresaAcessoBloqueadoId: string;
-  empresaForaDaCarteiraId: string;
-  empresaProcuracaoPendenteId: string;
-  empresaSemResponsavelId: string;
+  empresaAbertaId: string;
+  empresaForaCarteiraId: string;
+  empresaResolvidaId: string;
+  pendenciaAbertaAcessoId: string;
+  pendenciaAbertaOperacionalId: string;
+  pendenciaResolvidaProcuracaoId: string;
   responsavelAId: string;
   responsavelBId: string;
 };
@@ -61,7 +64,7 @@ let seededData: SeededPendenciasData;
 
 beforeAll(async () => {
   tempRoot = await mkdtemp(
-    path.join(os.tmpdir(), 'ecac-automacao-pendencias-it-')
+    path.join(os.tmpdir(), 'ecac-automacao-pendencias-filter-it-')
   );
   const databaseDir = path.join(tempRoot, 'postgres');
   postgresPort = await getFreePort();
@@ -138,8 +141,8 @@ afterAll(async () => {
   }
 }, TEST_TIMEOUT);
 
-describe('pendencias derivadas local', () => {
-  test('GET /pendencias responde 200 e deriva a fila corretamente', async () => {
+describe('filtros da fila de pendencias persistida', () => {
+  test('GET /pendencias ignora empresas fora da carteira e lista itens persistidos', async () => {
     const response = await requestJson('/pendencias', {
       cookie: sessionCookie
     });
@@ -148,126 +151,84 @@ describe('pendencias derivadas local', () => {
     expect(Array.isArray(response.body)).toBe(true);
 
     const items = response.body as Array<{
-      empresaCnpj: string;
       empresaId: string;
       empresaNome: string;
-      empresaNomeFantasia: string | null;
       linkTratamento: string;
-      motivo: string;
-      observacaoOperacional: string | null;
+      prioridade: PrioridadePendencia;
       responsavelInternoId: string | null;
-      responsavelInternoNome: string;
-      statusAtual: string;
-      tipoPendencia: string;
-      ultimaConferenciaOperacionalEm: string | null;
+      status: StatusPendencia;
+      tipoPendencia: TipoPendencia;
     }>;
 
-    expect(items).toHaveLength(6);
-    expect(items).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          empresaNome: 'Empresa Acesso Bloqueado Ltda',
-          statusAtual: 'BLOQUEADO',
-          tipoPendencia: 'ACESSO'
-        }),
-        expect.objectContaining({
-          empresaNome: 'Empresa Procuracao Pendente Ltda',
-          statusAtual: 'PENDENTE',
-          tipoPendencia: 'PROCURACAO'
-        }),
-        expect.objectContaining({
-          empresaNome: 'Empresa Sem Responsavel Ltda',
-          responsavelInternoId: null,
-          responsavelInternoNome: SEM_RESPONSAVEL_LABEL
-        })
-      ])
-    );
-
-    expect(items.map((item) => item.tipoPendencia)).toEqual(
-      expect.arrayContaining(['ACESSO', 'PROCURACAO', 'OPERACIONAL'])
-    );
+    expect(items).toHaveLength(3);
+    expect(
+      items.some((item) => item.empresaId === seededData.empresaForaCarteiraId)
+    ).toBe(false);
     expect(
       items.every((item) => item.linkTratamento === `/empresas/${item.empresaId}`)
     ).toBe(true);
-    expect(
-      items.some((item) => item.empresaNome.includes('Fora da Carteira'))
-    ).toBe(false);
+    expect(items.map((item) => item.tipoPendencia)).toEqual(
+      expect.arrayContaining([
+        TipoPendencia.ACESSO,
+        TipoPendencia.OPERACIONAL,
+        TipoPendencia.PROCURACAO
+      ])
+    );
   }, TEST_TIMEOUT);
 
-  test('filtra por responsavelInternoId e tipoPendencia', async () => {
+  test('filtra por status, prioridade, tipo e responsavel', async () => {
+    const statusResponse = await requestJson('/pendencias?status=ABERTA', {
+      cookie: sessionCookie
+    });
+
+    expect(statusResponse.response.status).toBe(200);
+    expect(statusResponse.body).toHaveLength(2);
+    expect(
+      (statusResponse.body as Array<{ status: StatusPendencia }>).every(
+        (item) => item.status === StatusPendencia.ABERTA
+      )
+    ).toBe(true);
+
+    const prioridadeResponse = await requestJson(
+      '/pendencias?prioridade=ALTA',
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(prioridadeResponse.response.status).toBe(200);
+    expect(prioridadeResponse.body).toHaveLength(1);
+    expect(
+      (prioridadeResponse.body as Array<{ tipoPendencia: TipoPendencia }>)[0]
+        ?.tipoPendencia
+    ).toBe(TipoPendencia.OPERACIONAL);
+
+    const tipoResponse = await requestJson('/pendencias?tipoPendencia=PROCURACAO', {
+      cookie: sessionCookie
+    });
+
+    expect(tipoResponse.response.status).toBe(200);
+    expect(tipoResponse.body).toHaveLength(1);
+    expect(
+      (tipoResponse.body as Array<{ status: StatusPendencia }>)[0]?.status
+    ).toBe(StatusPendencia.RESOLVIDA);
+
     const responsavelResponse = await requestJson(
-      `/pendencias?responsavelInternoId=${seededData.responsavelBId}`,
+      `/pendencias?responsavelInternoId=${seededData.responsavelAId}`,
       {
         cookie: sessionCookie
       }
     );
 
     expect(responsavelResponse.response.status).toBe(200);
-    const responsavelItems = responsavelResponse.body as Array<{
-      responsavelInternoId: string | null;
-      tipoPendencia: string;
-    }>;
-
-    expect(responsavelItems).toHaveLength(2);
+    expect(responsavelResponse.body).toHaveLength(2);
     expect(
-      responsavelItems.every(
-        (item) => item.responsavelInternoId === seededData.responsavelBId
+      (responsavelResponse.body as Array<{
+        responsavelInternoId: string | null;
+      }>).every(
+        (item) => item.responsavelInternoId === seededData.responsavelAId
       )
     ).toBe(true);
-
-    const tipoResponse = await requestJson('/pendencias?tipoPendencia=OPERACIONAL', {
-      cookie: sessionCookie
-    });
-
-    expect(tipoResponse.response.status).toBe(200);
-    const tipoItems = tipoResponse.body as Array<{
-      linkTratamento: string;
-      tipoPendencia: string;
-    }>;
-
-    expect(tipoItems).toHaveLength(2);
-    expect(tipoItems.every((item) => item.tipoPendencia === 'OPERACIONAL')).toBe(
-      true
-    );
-    expect(
-      tipoItems.every((item) => item.linkTratamento.startsWith('/empresas/'))
-    ).toBe(true);
-  }, TEST_TIMEOUT);
-
-  test('filtra por empresaId e nao retorna fora da carteira', async () => {
-    const empresaResponse = await requestJson(
-      `/pendencias?empresaId=${seededData.empresaSemResponsavelId}`,
-      {
-        cookie: sessionCookie
-      }
-    );
-
-    expect(empresaResponse.response.status).toBe(200);
-    const empresaItems = empresaResponse.body as Array<{
-      empresaId: string;
-      responsavelInternoId: string | null;
-      tipoPendencia: string;
-    }>;
-
-    expect(empresaItems).toHaveLength(3);
-    expect(
-      empresaItems.every(
-        (item) => item.empresaId === seededData.empresaSemResponsavelId
-      )
-    ).toBe(true);
-    expect(
-      empresaItems.every((item) => item.responsavelInternoId === null)
-    ).toBe(true);
-
-    const foraDaCarteiraResponse = await requestJson(
-      `/pendencias?empresaId=${seededData.empresaForaDaCarteiraId}`,
-      {
-        cookie: sessionCookie
-      }
-    );
-
-    expect(foraDaCarteiraResponse.response.status).toBe(200);
-    expect(foraDaCarteiraResponse.body).toEqual([]);
   }, TEST_TIMEOUT);
 });
 
@@ -304,80 +265,112 @@ async function seedPendenciasData(
     }
   });
 
-  const empresaRegular = await database.empresa.create({
+  const empresaAberta = await database.empresa.create({
     data: {
       cnpj: '11111111000191',
       naCarteira: true,
-      nomeFantasia: 'Carteira Regular',
-      pendenciaOperacional: false,
-      razaoSocial: 'Empresa Regular Ltda',
+      nomeFantasia: 'Carteira Aberta',
+      pendenciaOperacional: true,
+      razaoSocial: 'Empresa Carteira Aberta Ltda',
       regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
-      responsavelInternoId: responsavelA.id,
-      statusAcesso: StatusAcessoEmpresa.DISPONIVEL,
-      statusProcuracao: StatusProcuracaoEmpresa.VALIDA
-    }
-  });
-
-  const empresaAcessoBloqueado = await database.empresa.create({
-    data: {
-      cnpj: '22222222000172',
-      naCarteira: true,
-      nomeFantasia: 'Carteira Bloqueada',
-      pendenciaOperacional: false,
-      razaoSocial: 'Empresa Acesso Bloqueado Ltda',
-      regimeTributario: RegimeTributario.LUCRO_PRESUMIDO,
       responsavelInternoId: responsavelA.id,
       statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
       statusProcuracao: StatusProcuracaoEmpresa.VALIDA
     }
   });
 
-  const empresaProcuracaoPendente = await database.empresa.create({
+  const empresaResolvida = await database.empresa.create({
     data: {
-      cnpj: '33333333000163',
+      cnpj: '22222222000172',
       naCarteira: true,
-      nomeFantasia: 'Carteira Pendente',
-      pendenciaOperacional: true,
-      razaoSocial: 'Empresa Procuracao Pendente Ltda',
-      regimeTributario: RegimeTributario.LUCRO_REAL,
+      nomeFantasia: 'Carteira Resolvida',
+      pendenciaOperacional: false,
+      razaoSocial: 'Empresa Carteira Resolvida Ltda',
+      regimeTributario: RegimeTributario.LUCRO_PRESUMIDO,
       responsavelInternoId: responsavelB.id,
       statusAcesso: StatusAcessoEmpresa.DISPONIVEL,
       statusProcuracao: StatusProcuracaoEmpresa.PENDENTE
     }
   });
 
-  const empresaSemResponsavel = await database.empresa.create({
+  const empresaForaCarteira = await database.empresa.create({
     data: {
-      cnpj: '44444444000154',
-      naCarteira: true,
-      nomeFantasia: 'Carteira Sem Responsavel',
-      pendenciaOperacional: true,
-      razaoSocial: 'Empresa Sem Responsavel Ltda',
-      regimeTributario: RegimeTributario.OUTRO,
-      statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
-      statusProcuracao: StatusProcuracaoEmpresa.NAO_VERIFICADA
-    }
-  });
-
-  const empresaForaDaCarteira = await database.empresa.create({
-    data: {
-      cnpj: '55555555000145',
+      cnpj: '33333333000163',
       naCarteira: false,
       nomeFantasia: 'Fora da Carteira',
       pendenciaOperacional: true,
       razaoSocial: 'Empresa Fora da Carteira Ltda',
-      regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
-      responsavelInternoId: responsavelB.id,
+      regimeTributario: RegimeTributario.LUCRO_REAL,
+      responsavelInternoId: responsavelA.id,
       statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
       statusProcuracao: StatusProcuracaoEmpresa.PENDENTE
     }
   });
 
+  const pendenciaAbertaOperacional = await database.pendencia.create({
+    data: {
+      abertaEm: new Date('2026-04-10T09:00:00.000Z'),
+      descricao: 'Pendencia operacional aberta.',
+      empresaId: empresaAberta.id,
+      origem: 'MANUAL',
+      prioridade: PrioridadePendencia.ALTA,
+      responsavelInternoId: responsavelA.id,
+      status: StatusPendencia.ABERTA,
+      tipo: TipoPendencia.OPERACIONAL,
+      titulo: 'Pendencia operacional aberta'
+    }
+  });
+
+  const pendenciaAbertaAcesso = await database.pendencia.create({
+    data: {
+      abertaEm: new Date('2026-04-11T09:00:00.000Z'),
+      descricao: 'Pendencia de acesso aberta.',
+      empresaId: empresaAberta.id,
+      origem: 'MANUAL',
+      prioridade: PrioridadePendencia.MEDIA,
+      responsavelInternoId: responsavelA.id,
+      status: StatusPendencia.ABERTA,
+      tipo: TipoPendencia.ACESSO,
+      titulo: 'Pendencia de acesso aberta'
+    }
+  });
+
+  const pendenciaResolvidaProcuracao = await database.pendencia.create({
+    data: {
+      abertaEm: new Date('2026-04-08T09:00:00.000Z'),
+      descricao: 'Pendencia de procuracao resolvida.',
+      empresaId: empresaResolvida.id,
+      fechadaEm: new Date('2026-04-12T09:00:00.000Z'),
+      origem: 'MANUAL',
+      prioridade: PrioridadePendencia.BAIXA,
+      responsavelInternoId: responsavelB.id,
+      status: StatusPendencia.RESOLVIDA,
+      tipo: TipoPendencia.PROCURACAO,
+      titulo: 'Pendencia de procuracao resolvida'
+    }
+  });
+
+  await database.pendencia.create({
+    data: {
+      abertaEm: new Date('2026-04-12T11:00:00.000Z'),
+      descricao: 'Pendencia fora da carteira.',
+      empresaId: empresaForaCarteira.id,
+      origem: 'MANUAL',
+      prioridade: PrioridadePendencia.ALTA,
+      responsavelInternoId: responsavelA.id,
+      status: StatusPendencia.ABERTA,
+      tipo: TipoPendencia.OPERACIONAL,
+      titulo: 'Pendencia fora da carteira'
+    }
+  });
+
   return {
-    empresaAcessoBloqueadoId: empresaAcessoBloqueado.id,
-    empresaForaDaCarteiraId: empresaForaDaCarteira.id,
-    empresaProcuracaoPendenteId: empresaProcuracaoPendente.id,
-    empresaSemResponsavelId: empresaSemResponsavel.id,
+    empresaAbertaId: empresaAberta.id,
+    empresaForaCarteiraId: empresaForaCarteira.id,
+    empresaResolvidaId: empresaResolvida.id,
+    pendenciaAbertaAcessoId: pendenciaAbertaAcesso.id,
+    pendenciaAbertaOperacionalId: pendenciaAbertaOperacional.id,
+    pendenciaResolvidaProcuracaoId: pendenciaResolvidaProcuracao.id,
     responsavelAId: responsavelA.id,
     responsavelBId: responsavelB.id
   };
@@ -497,11 +490,15 @@ function runBackendBuild(): void {
     'lib',
     'tsc.js'
   );
-  const result = spawnSync(process.execPath, [tscCli, '-p', 'tsconfig.build.json'], {
-    cwd: API_ROOT,
-    encoding: 'utf8',
-    env: process.env
-  });
+  const result = spawnSync(
+    process.execPath,
+    [tscCli, '-p', 'tsconfig.build.json'],
+    {
+      cwd: API_ROOT,
+      encoding: 'utf8',
+      env: process.env
+    }
+  );
 
   if (result.error || result.status !== 0) {
     throw new Error(

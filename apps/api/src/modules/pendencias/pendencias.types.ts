@@ -1,5 +1,6 @@
-import {
-  Prisma,
+import { Prisma } from '@prisma/client';
+
+import type {
   StatusAcessoEmpresa,
   StatusProcuracaoEmpresa
 } from '@prisma/client';
@@ -13,47 +14,167 @@ export const TipoPendenciaEnum = {
 export type TipoPendencia =
   (typeof TipoPendenciaEnum)[keyof typeof TipoPendenciaEnum];
 
-export const CriticidadePendenciaEnum = {
+export const StatusPendenciaEnum = {
+  ABERTA: 'ABERTA',
+  RESOLVIDA: 'RESOLVIDA'
+} as const;
+
+export type StatusPendencia =
+  (typeof StatusPendenciaEnum)[keyof typeof StatusPendenciaEnum];
+
+export const PrioridadePendenciaEnum = {
   ALTA: 'ALTA',
   BAIXA: 'BAIXA',
   MEDIA: 'MEDIA'
 } as const;
 
-export type CriticidadePendencia =
-  (typeof CriticidadePendenciaEnum)[keyof typeof CriticidadePendenciaEnum];
+export type PrioridadePendencia =
+  (typeof PrioridadePendenciaEnum)[keyof typeof PrioridadePendenciaEnum];
 
-export const SEM_RESPONSAVEL_LABEL = 'Sem responsável';
+export const CriticidadePendenciaEnum = PrioridadePendenciaEnum;
+
+export type CriticidadePendencia = PrioridadePendencia;
+
+export const TipoLogExecucaoEnum = {
+  CONFERENCIA_OPERACIONAL: 'CONFERENCIA_OPERACIONAL',
+  REGISTRO_PENDENCIA: 'REGISTRO_PENDENCIA',
+  REGULARIZACAO_PENDENCIA: 'REGULARIZACAO_PENDENCIA',
+  RETIRADA_CARTEIRA: 'RETIRADA_CARTEIRA'
+} as const;
+
+export type TipoLogExecucao =
+  (typeof TipoLogExecucaoEnum)[keyof typeof TipoLogExecucaoEnum];
+
+export const ResultadoLogExecucaoEnum = {
+  FALHA: 'FALHA',
+  SEM_ALTERACAO: 'SEM_ALTERACAO',
+  SUCESSO: 'SUCESSO'
+} as const;
+
+export type ResultadoLogExecucao =
+  (typeof ResultadoLogExecucaoEnum)[keyof typeof ResultadoLogExecucaoEnum];
+
+export const SEM_RESPONSAVEL_LABEL = 'Sem responsavel';
+
+export type PendenciaCompanySummary = {
+  cnpj: string;
+  id: string;
+  naCarteira: boolean;
+  nomeFantasia: string | null;
+  pendenciaOperacional: boolean;
+  observacoesOperacionais: string | null;
+  razaoSocial: string;
+  responsavelInternoId: string | null;
+  statusAcesso: StatusAcessoEmpresa;
+  statusProcuracao: StatusProcuracaoEmpresa;
+  ultimaConferenciaOperacionalEm: string | null;
+  regularizadaEm: string | null;
+};
 
 export type PendenciaStatusAtual =
   | StatusAcessoEmpresa
   | StatusProcuracaoEmpresa
+  | StatusPendencia
   | 'PENDENTE';
 
-export type PendenciaItem = {
+export type PendenciaRecord = {
+  abertaEm: string;
+  atualizadaPorUsuarioInternoId: string | null;
+  criadaPorUsuarioInternoId: string | null;
+  createdAt: string;
+  descricao: string;
+  empresa: PendenciaCompanySummary;
   empresaCnpj: string;
-  empresaId: string;
   empresaNome: string;
   empresaNomeFantasia: string | null;
+  empresaId: string;
+  fechadaEm: string | null;
+  id: string;
   linkTratamento: string;
   motivo: string;
+  origem: string | null;
   observacaoOperacional: string | null;
+  prioridade: PrioridadePendencia;
+  criticidade: PrioridadePendencia;
   responsavelInternoId: string | null;
   responsavelInternoNome: string;
   statusAtual: PendenciaStatusAtual;
+  status: StatusPendencia;
   tipoPendencia: TipoPendencia;
-  ultimaConferenciaOperacionalEm: Date | null;
+  titulo: string;
+  tipo: TipoPendencia;
+  ultimaConferenciaOperacionalEm: string | null;
+  updatedAt: string;
 };
 
-export type PendenciaOperacionalRecord = Prisma.PendenciaOperacionalGetPayload<{
-  select: {
-    createdAt: true;
-    criticidade: true;
-    descricao: true;
-    empresaId: true;
-    id: true;
-    origem: true;
-    resolvedAt: true;
-    status: true;
-    tipo: true;
-  };
-}>;
+export type PendenciaListItem = PendenciaRecord;
+
+export type PendenciaItem = PendenciaListItem;
+
+export type PendenciaOperacionalRecord = PendenciaRecord;
+
+export type LogExecucaoRecord = {
+  createdAt: string;
+  detalhes: string | null;
+  empresaId: string;
+  empresaNome: string;
+  executadoEm: string;
+  executadoPorUsuarioInternoId: string | null;
+  executadoPorUsuarioInternoNome: string;
+  id: string;
+  chaveIdempotencia: string | null;
+  pendenciaId: string | null;
+  pendenciaStatus: StatusPendencia | null;
+  pendenciaTipo: TipoPendencia | null;
+  pendenciaTitulo: string | null;
+  resultado: ResultadoLogExecucao;
+  resumo: string;
+  tipo: TipoLogExecucao;
+};
+
+export type CompanyOperationalHistory = {
+  empresaId: string;
+  empresaNome: string;
+  logs: LogExecucaoRecord[];
+  pendencias: PendenciaRecord[];
+};
+
+export type PendenciaListFilters = {
+  empresaId?: string | undefined;
+  prioridade?: PrioridadePendencia | undefined;
+  responsavelInternoId?: string | undefined;
+  status?: StatusPendencia | undefined;
+  tipoPendencia?: TipoPendencia | undefined;
+  take?: number | undefined;
+};
+
+export type PendenciaCreateInput = {
+  descricao?: string | undefined;
+  origem?: string | undefined;
+  prioridade?: PrioridadePendencia | undefined;
+  responsavelInternoId?: string | null | undefined;
+  chaveIdempotencia?: string | null | undefined;
+  status?: StatusPendencia | undefined;
+  tipo?: TipoPendencia | undefined;
+  titulo?: string | undefined;
+};
+
+export type PendenciaUpdateInput = {
+  descricao?: string | undefined;
+  origem?: string | undefined;
+  prioridade?: PrioridadePendencia | undefined;
+  responsavelInternoId?: string | null | undefined;
+  status?: StatusPendencia | undefined;
+  titulo?: string | undefined;
+};
+
+export type CompanyOperationalActionInput = {
+  chaveIdempotencia?: string | null | undefined;
+  pendenciaId?: string | null | undefined;
+};
+
+export type CompanyPendenciaResolveInput = {
+  chaveIdempotencia?: string | null | undefined;
+};
+
+export type PendenciaQueryWhere = Prisma.PendenciaWhereInput;
