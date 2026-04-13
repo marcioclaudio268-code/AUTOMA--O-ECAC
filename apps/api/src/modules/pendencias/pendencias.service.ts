@@ -251,34 +251,43 @@ export class PendenciasService {
       }
 
       const data: Prisma.PendenciaUncheckedUpdateInput = {};
+      let descricaoChanged = false;
+      let origemChanged = false;
+      let prioridadeChanged = false;
+      let responsavelChanged = false;
       let statusChanged = false;
+      let tituloChanged = false;
 
       if (dto.titulo !== undefined) {
         const titulo = normalizeText(dto.titulo);
 
-        if (titulo !== undefined) {
+        if (titulo !== undefined && titulo !== pendencia.titulo) {
           data.titulo = titulo;
+          tituloChanged = true;
         }
       }
 
       if (dto.descricao !== undefined) {
         const descricao = normalizeText(dto.descricao);
 
-        if (descricao !== undefined) {
+        if (descricao !== undefined && descricao !== pendencia.descricao) {
           data.descricao = descricao;
+          descricaoChanged = true;
         }
       }
 
       if (dto.origem !== undefined) {
         const origem = normalizeText(dto.origem);
 
-        if (origem !== undefined) {
+        if (origem !== undefined && origem !== pendencia.origem) {
           data.origem = origem;
+          origemChanged = true;
         }
       }
 
-      if (dto.prioridade !== undefined) {
+      if (dto.prioridade !== undefined && dto.prioridade !== pendencia.prioridade) {
         data.prioridade = dto.prioridade;
+        prioridadeChanged = true;
       }
 
       if (dto.responsavelInternoId !== undefined) {
@@ -286,8 +295,12 @@ export class PendenciasService {
           dto.responsavelInternoId
         );
 
-        if (responsavelInternoId !== undefined) {
+        if (
+          responsavelInternoId !== undefined &&
+          responsavelInternoId !== pendencia.responsavelInternoId
+        ) {
           data.responsavelInternoId = responsavelInternoId;
+          responsavelChanged = true;
         }
       }
 
@@ -314,6 +327,17 @@ export class PendenciasService {
         }
       });
 
+      const manualChangeDetails = buildPendenciaManualChangeDetails({
+        descricaoChanged,
+        origemChanged,
+        pendenciaAnterior: pendencia as PendenciaWithRelations,
+        pendenciaAtual: updated as PendenciaWithRelations,
+        prioridadeChanged,
+        responsavelChanged,
+        tituloChanged
+      });
+      const manualChangeCount = manualChangeDetails.length;
+
       if (updated.tipo === TipoPendenciaEnum.OPERACIONAL && statusChanged) {
         await this.refreshOperationalSummary(
           client,
@@ -326,7 +350,12 @@ export class PendenciasService {
 
       if (statusChanged) {
         await this.logsService.recordExecution(client, {
-          detalhes: `Pendencia ${updated.status === StatusPendenciaEnum.RESOLVIDA ? 'resolvida' : 'reaberta'}.`,
+          detalhes: [
+            `Pendencia ${updated.status === StatusPendenciaEnum.RESOLVIDA ? 'resolvida' : 'reaberta'}.`,
+            ...manualChangeDetails
+          ]
+            .filter(Boolean)
+            .join(' '),
           empresaId: updated.empresaId,
           executadoPorUsuarioInternoId,
           pendenciaId: updated.id,
@@ -342,12 +371,23 @@ export class PendenciasService {
         });
       } else {
         await this.logsService.recordExecution(client, {
-          detalhes: 'Campos de pendencia ajustados manualmente.',
+          detalhes:
+            manualChangeDetails.join(' ') ||
+            'Campos de pendencia ajustados manualmente.',
           empresaId: updated.empresaId,
           executadoPorUsuarioInternoId,
           pendenciaId: updated.id,
           resultado: ResultadoLogExecucaoEnum.SUCESSO,
-          resumo: `Pendencia atualizada: ${updated.titulo}`,
+          resumo: buildPendenciaUpdateSummary(
+            updated.titulo,
+            manualChangeCount,
+            {
+              descricaoChanged,
+              prioridadeChanged,
+              responsavelChanged,
+              tituloChanged
+            }
+          ),
           tipo: TipoLogExecucaoEnum.REGISTRO_PENDENCIA
         });
       }
@@ -768,4 +808,98 @@ function normalizeNullableText(
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function buildPendenciaUpdateSummary(
+  titulo: string,
+  changeCount: number,
+  input: {
+    descricaoChanged: boolean;
+    prioridadeChanged: boolean;
+    responsavelChanged: boolean;
+    tituloChanged: boolean;
+  }
+): string {
+  if (changeCount === 1 && input.responsavelChanged) {
+    return `Pendencia reatribuida: ${titulo}`;
+  }
+
+  if (changeCount === 1 && input.descricaoChanged) {
+    return `Observacao registrada: ${titulo}`;
+  }
+
+  if (changeCount === 1 && input.prioridadeChanged) {
+    return `Prioridade ajustada: ${titulo}`;
+  }
+
+  if (changeCount === 1 && input.tituloChanged) {
+    return `Pendencia renomeada: ${titulo}`;
+  }
+
+  return `Pendencia atualizada: ${titulo}`;
+}
+
+function buildPendenciaManualChangeDetails(input: {
+  descricaoChanged: boolean;
+  origemChanged: boolean;
+  pendenciaAnterior: PendenciaWithRelations;
+  pendenciaAtual: PendenciaWithRelations;
+  prioridadeChanged: boolean;
+  responsavelChanged: boolean;
+  tituloChanged: boolean;
+}): string[] {
+  const details: string[] = [];
+
+  if (input.responsavelChanged) {
+    details.push(
+      `Responsavel alterado de ${formatResponsavelLogLabel(
+        input.pendenciaAnterior.responsavelInterno?.nome
+      )} para ${formatResponsavelLogLabel(
+        input.pendenciaAtual.responsavelInterno?.nome
+      )}.`
+    );
+  }
+
+  if (input.descricaoChanged) {
+    details.push('Observacao operacional atualizada.');
+  }
+
+  if (input.prioridadeChanged) {
+    details.push(
+      `Prioridade alterada para ${formatPrioridadeLogLabel(
+        input.pendenciaAtual.prioridade
+      )}.`
+    );
+  }
+
+  if (input.tituloChanged) {
+    details.push('Titulo da pendencia atualizado.');
+  }
+
+  if (input.origemChanged) {
+    details.push(
+      `Origem ajustada para ${input.pendenciaAtual.origem ?? 'sem origem'}.`
+    );
+  }
+
+  return details;
+}
+
+function formatPrioridadeLogLabel(
+  prioridade: (typeof PrioridadePendenciaEnum)[keyof typeof PrioridadePendenciaEnum]
+): string {
+  switch (prioridade) {
+    case PrioridadePendenciaEnum.ALTA:
+      return 'alta';
+    case PrioridadePendenciaEnum.MEDIA:
+      return 'media';
+    case PrioridadePendenciaEnum.BAIXA:
+    default:
+      return 'baixa';
+  }
+}
+
+function formatResponsavelLogLabel(value: string | null | undefined): string {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : 'Sem responsavel';
 }
