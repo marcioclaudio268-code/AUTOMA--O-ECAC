@@ -11,7 +11,6 @@ import {
   getCompany,
   getCompanyOperationalHistory,
   listEventosOperacionais,
-  listCompanyPendencias,
   listResponsaveis,
   listVarreduras,
   registerCompanyCheck,
@@ -68,10 +67,6 @@ type OperationalQuickAction =
   | 'marcarProcuracaoValida'
   | 'regularizarPendenciaOperacional'
   | 'reabrirPendenciaOperacional';
-
-type PendenciaStatusFilter = 'TODAS' | PendenciaOperacionalRecord['status'];
-type PendenciaCriticidadeFilter =
-  'TODAS' | PendenciaOperacionalRecord['criticidade'];
 
 const initialFormState: CompanyFormState = {
   cnpj: '',
@@ -436,13 +431,6 @@ export default function CompanyDetailPage() {
   >([]);
   const [operationalHistory, setOperationalHistory] =
     useState<CompanyOperationalHistory | null>(null);
-  const [pendenciasOperacionais, setPendenciasOperacionais] = useState<
-    PendenciaOperacionalRecord[]
-  >([]);
-  const [pendenciaStatusFilter, setPendenciaStatusFilter] =
-    useState<PendenciaStatusFilter>('TODAS');
-  const [pendenciaCriticidadeFilter, setPendenciaCriticidadeFilter] =
-    useState<PendenciaCriticidadeFilter>('TODAS');
   const [form, setForm] = useState<CompanyFormState>(initialFormState);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -455,16 +443,6 @@ export default function CompanyDetailPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [flashMessage, setFlashMessage] = useState('');
-
-  function buildPendenciaFilters(
-    status: PendenciaStatusFilter,
-    criticidade: PendenciaCriticidadeFilter
-  ) {
-    return {
-      ...(status === 'TODAS' ? {} : { status }),
-      ...(criticidade === 'TODAS' ? {} : { criticidade })
-    };
-  }
 
   useEffect(() => {
     const paramsSearch = new URLSearchParams(window.location.search);
@@ -543,20 +521,6 @@ export default function CompanyDetailPage() {
             }
           }
 
-          try {
-            const pendencias = await listCompanyPendencias(
-              companyId,
-              buildPendenciaFilters('TODAS', 'TODAS')
-            );
-
-            if (active) {
-              setPendenciasOperacionais(pendencias);
-            }
-          } catch {
-            if (active) {
-              setPendenciasOperacionais([]);
-            }
-          }
         } catch (responsaveisError) {
           if (!active) {
             return;
@@ -787,18 +751,6 @@ export default function CompanyDetailPage() {
       setOperationalHistory(null);
     }
 
-    try {
-      const pendencias = await listCompanyPendencias(
-        companyId,
-        buildPendenciaFilters(
-          pendenciaStatusFilter,
-          pendenciaCriticidadeFilter
-        )
-      );
-      setPendenciasOperacionais(pendencias);
-    } catch {
-      setPendenciasOperacionais([]);
-    }
   }
 
   async function handleManualScan() {
@@ -1487,14 +1439,15 @@ export default function CompanyDetailPage() {
         ) : null}
 
         {company ? (
-          <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-            <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="grid gap-6 lg:grid-cols-[0.92fr_1.08fr]">
+            <section className="order-2 space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Dados principais
+                  Cadastro e apoio
                 </h2>
                 <p className="text-sm text-slate-600">
-                  Identidade, responsavel e marcos da operacao atual.
+                  Dados de suporte para decidir e editar, sem repetir a leitura
+                  operacional central da tela.
                 </p>
               </div>
 
@@ -1509,6 +1462,14 @@ export default function CompanyDetailPage() {
                 </div>
                 <div className="space-y-1">
                   <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Nome fantasia
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {company.nomeFantasia?.trim() || '-'}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
                     Regime tributario
                   </dt>
                   <dd className="text-sm font-medium text-slate-900">
@@ -1517,18 +1478,12 @@ export default function CompanyDetailPage() {
                 </div>
                 <div className="space-y-1">
                   <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Status de acesso
+                    Responsavel interno
                   </dt>
                   <dd className="text-sm font-medium text-slate-900">
-                    {STATUS_ACESSO_LABELS[company.statusAcesso]}
-                  </dd>
-                </div>
-                <div className="space-y-1">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Status de procuracao
-                  </dt>
-                  <dd className="text-sm font-medium text-slate-900">
-                    {STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
+                    {company.responsavelInterno
+                      ? company.responsavelInterno.nome
+                      : '-'}
                   </dd>
                 </div>
                 <div className="space-y-1">
@@ -1545,40 +1500,6 @@ export default function CompanyDetailPage() {
                   </dt>
                   <dd className="text-sm font-medium text-slate-900">
                     {formatDateTime(company.ultimaConferenciaProcuracaoEm)}
-                  </dd>
-                </div>
-                <div className="space-y-1">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Ultima conferencia operacional
-                  </dt>
-                  <dd className="text-sm font-medium text-slate-900">
-                    {formatDateTime(company.ultimaConferenciaOperacionalEm)}
-                  </dd>
-                </div>
-                <div className="space-y-1">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Pendencia operacional
-                  </dt>
-                  <dd className="text-sm font-medium text-slate-900">
-                    {company.pendenciaOperacional ? 'Sim' : 'Nao'}
-                  </dd>
-                </div>
-                <div className="space-y-1">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Regularizada em
-                  </dt>
-                  <dd className="text-sm font-medium text-slate-900">
-                    {formatDateTime(company.regularizadaEm)}
-                  </dd>
-                </div>
-                <div className="space-y-1">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Responsavel interno
-                  </dt>
-                  <dd className="text-sm font-medium text-slate-900">
-                    {company.responsavelInterno
-                      ? company.responsavelInterno.nome
-                      : '-'}
                   </dd>
                 </div>
                 <div className="space-y-1">
@@ -1614,26 +1535,6 @@ export default function CompanyDetailPage() {
                   </dd>
                 </div>
               </dl>
-
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-semibold text-slate-900">
-                      Observacoes operacionais
-                    </h3>
-                    <p className="text-xs leading-5 text-slate-500">
-                      Campo de tratamento para contexto, pendencias e proximo
-                      passo.
-                    </p>
-                  </div>
-                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Leitura atual
-                  </span>
-                </div>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                  {formatOperationalText(company.observacoesOperacionais)}
-                </p>
-              </div>
 
               <div className="space-y-3">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
@@ -1822,228 +1723,16 @@ export default function CompanyDetailPage() {
                 )}
               </div>
 
-              <div className="space-y-3">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-900">
-                      Historico operacional
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Ultimos registros persistidos de conferencia, pendencia e
-                      retirada.
-                    </p>
-                  </div>
-                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    {logsRecentes.length} registro(s)
-                  </span>
-                </div>
-                {logsRecentes.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
-                    Nenhum log operacional recente registrado.
-                  </p>
-                ) : (
-                  <ul className="space-y-3">
-                    {logsRecentes.map((log) => (
-                      <li
-                        className="rounded-2xl border border-slate-200 bg-white p-4"
-                        key={log.id}
-                      >
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="space-y-1">
-                            <p className="text-sm font-semibold text-slate-900">
-                              {formatLogTypeLabel(log.tipo)}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {formatDateTime(log.executadoEm)}
-                              {' - '}
-                              {log.executadoPorUsuarioInternoNome}
-                            </p>
-                          </div>
-                          <span
-                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
-                              getLogTone(log.resultado)
-                            )}`}
-                          >
-                            {formatLogResultLabel(log.resultado)}
-                          </span>
-                        </div>
-                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                          {log.resumo}
-                        </p>
-                        {log.detalhes ? (
-                          <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-500">
-                            {log.detalhes}
-                          </p>
-                        ) : null}
-                        {log.pendenciaTitulo ? (
-                          <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-500">
-                            Pendencia relacionada: {log.pendenciaTitulo}
-                          </p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-900">
-                      Pendencias operacionais recentes
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Itens em acompanhamento que continuam abertos ou foram
-                      encerrados manualmente.
-                    </p>
-                  </div>
-                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    {pendenciasOperacionais.length} registro(s)
-                  </span>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
-                    <label className="space-y-2">
-                      <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                        Status
-                      </span>
-                      <select
-                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
-                        name="pendenciaStatusFilter"
-                        onChange={(event) =>
-                          setPendenciaStatusFilter(
-                            event.target.value as PendenciaStatusFilter
-                          )
-                        }
-                        value={pendenciaStatusFilter}
-                      >
-                        <option value="TODAS">Todas</option>
-                        <option value="ABERTA">Abertas</option>
-                        <option value="RESOLVIDA">Resolvidas</option>
-                      </select>
-                    </label>
-
-                    <label className="space-y-2">
-                      <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                        Criticidade
-                      </span>
-                      <select
-                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
-                        name="pendenciaCriticidadeFilter"
-                        onChange={(event) =>
-                          setPendenciaCriticidadeFilter(
-                            event.target.value as PendenciaCriticidadeFilter
-                          )
-                        }
-                        value={pendenciaCriticidadeFilter}
-                      >
-                        <option value="TODAS">Todas</option>
-                        <option value="ALTA">Alta</option>
-                        <option value="MEDIA">Media</option>
-                        <option value="BAIXA">Baixa</option>
-                      </select>
-                    </label>
-
-                    <div className="flex items-end">
-                      <button
-                        className="inline-flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={isSaving}
-                        onClick={() => void refreshOperationalData()}
-                        type="button"
-                      >
-                        Aplicar filtros
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                {pendenciasOperacionais.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
-                    Nenhuma pendencia operacional encontrada para os filtros
-                    selecionados.
-                  </p>
-                ) : (
-                  <ul className="space-y-3">
-                    {pendenciasOperacionais.map((pendencia) => {
-                      const isOpen = pendencia.status === 'ABERTA';
-                      const isResolving =
-                        resolvingPendenciaId === pendencia.id && isSaving;
-
-                      return (
-                        <li
-                          className="rounded-2xl border border-slate-200 bg-white p-4"
-                          key={pendencia.id}
-                        >
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="space-y-1">
-                              <p className="text-sm font-semibold text-slate-900">
-                                {formatPendenciaTypeLabel(pendencia.tipo)}
-                              </p>
-                              <p className="text-xs text-slate-500">
-                                Criada em {formatDateTime(pendencia.createdAt)}
-                              </p>
-                              <div className="flex flex-wrap gap-2 pt-1">
-                                <span
-                                  className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
-                                    getPendenciaTone(pendencia.status)
-                                  )}`}
-                                >
-                                  {formatPendenciaStatusLabel(pendencia.status)}
-                                </span>
-                                <span
-                                  className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
-                                    getPendenciaCriticidadeTone(
-                                      pendencia.criticidade
-                                    )
-                                  )}`}
-                                >
-                                  {formatPendenciaCriticidadeLabel(
-                                    pendencia.criticidade
-                                  )}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                            {pendencia.descricao}
-                          </p>
-                          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                              {pendencia.resolvedAt
-                                ? `Resolvida em ${formatDateTime(pendencia.resolvedAt)}`
-                                : pendencia.origem || 'Origem manual'}
-                            </p>
-                            {isOpen ? (
-                              <button
-                                className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
-                                disabled={isSaving}
-                                onClick={() =>
-                                  void handleResolvePendencia(pendencia.id)
-                                }
-                                type="button"
-                              >
-                                {isResolving
-                                  ? 'Resolvendo...'
-                                  : 'Marcar como resolvida'}
-                              </button>
-                            ) : null}
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section className="order-1 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="mb-5">
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Atualizacao operacional
+                  Edicao manual
                 </h2>
                 <p className="text-sm text-slate-600">
-                  Atualize os campos principais e os status que alimentam o
-                  tratamento da empresa.
+                  Ajuste os campos de cadastro e os marcadores operacionais sem
+                  sair da tela principal de trabalho.
                 </p>
               </div>
 

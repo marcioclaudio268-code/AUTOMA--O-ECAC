@@ -411,6 +411,74 @@ describe('rastreabilidade operacional da empresa', () => {
     });
   }, TEST_TIMEOUT);
 
+  test('edicao manual da empresa continua funcional no detalhe operacional', async () => {
+    const empresa = await prisma.empresa.create({
+      data: {
+        cnpj: '66666666000116',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Edicao Manual',
+        pendenciaOperacional: false,
+        razaoSocial: 'Empresa Edicao Manual Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: seededData.responsavelId,
+        statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
+        statusProcuracao: StatusProcuracaoEmpresa.NAO_VERIFICADA
+      }
+    });
+
+    const response = await requestJson(`/companies/${empresa.id}`, {
+      body: {
+        nomeFantasia: 'Empresa Edicao Manual Revisada',
+        observacoesOperacionais:
+          'Cliente avisado. Aguardando regularizacao do acesso.',
+        pendenciaOperacional: true,
+        statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
+        statusProcuracao: StatusProcuracaoEmpresa.PENDENTE,
+        ultimaConferenciaOperacionalEm: '2026-04-13T11:00:00.000Z'
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      id: empresa.id,
+      nomeFantasia: 'Empresa Edicao Manual Revisada',
+      observacoesOperacionais:
+        'Cliente avisado. Aguardando regularizacao do acesso.',
+      pendenciaOperacional: true,
+      statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
+      statusProcuracao: StatusProcuracaoEmpresa.PENDENTE,
+      ultimaConferenciaOperacionalEm: '2026-04-13T11:00:00.000Z'
+    });
+
+    const persisted = await prisma.empresa.findUnique({
+      select: {
+        nomeFantasia: true,
+        observacoesOperacionais: true,
+        pendenciaOperacional: true,
+        statusAcesso: true,
+        statusProcuracao: true,
+        ultimaConferenciaOperacionalEm: true
+      },
+      where: {
+        id: empresa.id
+      }
+    });
+
+    expect(persisted).toMatchObject({
+      nomeFantasia: 'Empresa Edicao Manual Revisada',
+      observacoesOperacionais:
+        'Cliente avisado. Aguardando regularizacao do acesso.',
+      pendenciaOperacional: true,
+      statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
+      statusProcuracao: StatusProcuracaoEmpresa.PENDENTE
+    });
+    expect(
+      persisted?.ultimaConferenciaOperacionalEm?.toISOString()
+    ).toBe('2026-04-13T11:00:00.000Z');
+  }, TEST_TIMEOUT);
+
   test('conferir agora grava LogExecucao e atualiza ultimaConferenciaOperacionalEm', async () => {
     const response = await requestJson(
       `/companies/${seededData.empresaCheckId}/operational/check`,
