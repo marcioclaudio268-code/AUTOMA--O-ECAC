@@ -35,6 +35,24 @@ export const CriticidadePendenciaEnum = PrioridadePendenciaEnum;
 
 export type CriticidadePendencia = PrioridadePendencia;
 
+export const PendenciaSortByEnum = {
+  ABERTA_EM: 'ABERTA_EM',
+  ATUALIZADA_EM: 'ATUALIZADA_EM',
+  PRIORIDADE: 'PRIORIDADE',
+  STATUS: 'STATUS'
+} as const;
+
+export type PendenciaSortBy =
+  (typeof PendenciaSortByEnum)[keyof typeof PendenciaSortByEnum];
+
+export const SortDirectionEnum = {
+  ASC: 'ASC',
+  DESC: 'DESC'
+} as const;
+
+export type SortDirection =
+  (typeof SortDirectionEnum)[keyof typeof SortDirectionEnum];
+
 export const TipoLogExecucaoEnum = {
   CONFERENCIA_OPERACIONAL: 'CONFERENCIA_OPERACIONAL',
   REGISTRO_PENDENCIA: 'REGISTRO_PENDENCIA',
@@ -80,7 +98,9 @@ export type PendenciaStatusAtual =
 export type PendenciaRecord = {
   abertaEm: string;
   atualizadaPorUsuarioInternoId: string | null;
+  atualizadaPorUsuarioInternoNome: string | null;
   criadaPorUsuarioInternoId: string | null;
+  criadaPorUsuarioInternoNome: string | null;
   createdAt: string;
   descricao: string;
   empresa: PendenciaCompanySummary;
@@ -141,8 +161,11 @@ export type CompanyOperationalHistory = {
 
 export type PendenciaListFilters = {
   empresaId?: string | undefined;
+  page?: number | undefined;
   prioridade?: PrioridadePendencia | undefined;
   responsavelInternoId?: string | undefined;
+  sortBy?: PendenciaSortBy | undefined;
+  sortDirection?: SortDirection | undefined;
   status?: StatusPendencia | undefined;
   tipoPendencia?: TipoPendencia | undefined;
   take?: number | undefined;

@@ -78,6 +78,26 @@ export class LogsService {
     return logs.map(mapLogExecucaoRecord);
   }
 
+  async listPendenciaLogs(
+    pendenciaId: string,
+    query: ListCompanyLogsQueryDto = {}
+  ): Promise<LogExecucaoRecord[]> {
+    await this.assertPendenciaExists(pendenciaId);
+
+    const logs = await this.prisma.logExecucao.findMany({
+      include: logInclude,
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      take: query.take ?? 20,
+      where: {
+        pendenciaId
+      }
+    });
+
+    return logs.map(mapLogExecucaoRecord);
+  }
+
   async getCompanyOperationalHistory(
     companyId: string,
     query: ListCompanyLogsQueryDto = {}
@@ -148,5 +168,25 @@ export class LogsService {
     }
 
     return company;
+  }
+
+  private async assertPendenciaExists(
+    id: string
+  ): Promise<{ id: string; empresaId: string }> {
+    const pendencia = await this.prisma.pendencia.findUnique({
+      select: {
+        empresaId: true,
+        id: true
+      },
+      where: {
+        id
+      }
+    });
+
+    if (!pendencia) {
+      throw new NotFoundException('Pendencia nao encontrada.');
+    }
+
+    return pendencia;
   }
 }

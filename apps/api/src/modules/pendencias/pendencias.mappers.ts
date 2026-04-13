@@ -1,11 +1,15 @@
 import { Prisma } from '@prisma/client';
 
 import {
+  SortDirectionEnum,
+  PendenciaSortByEnum,
   SEM_RESPONSAVEL_LABEL,
   type CompanyOperationalHistory,
   type LogExecucaoRecord,
   type PendenciaRecord,
-  type PrioridadePendencia
+  type PendenciaSortBy,
+  type PrioridadePendencia,
+  type SortDirection
 } from './pendencias.types';
 
 const EXECUCAO_SISTEMA_LABEL = 'Sistema';
@@ -15,6 +19,11 @@ export const PENDENCIA_PRIORITY_ORDER: Record<PrioridadePendencia, number> = {
   MEDIA: 1,
   BAIXA: 2
 };
+
+export const PENDENCIA_STATUS_ORDER = {
+  ABERTA: 0,
+  RESOLVIDA: 1
+} as const;
 
 export const pendenciaInclude = {
   atualizadaPorUsuarioInterno: {
@@ -104,7 +113,11 @@ export function mapPendenciaRecord(
   return {
     abertaEm: pendencia.abertaEm.toISOString(),
     atualizadaPorUsuarioInternoId: pendencia.atualizadaPorUsuarioInternoId,
+    atualizadaPorUsuarioInternoNome:
+      pendencia.atualizadaPorUsuarioInterno?.nome?.trim() ?? null,
     criadaPorUsuarioInternoId: pendencia.criadaPorUsuarioInternoId,
+    criadaPorUsuarioInternoNome:
+      pendencia.criadaPorUsuarioInterno?.nome?.trim() ?? null,
     createdAt: pendencia.createdAt.toISOString(),
     descricao: pendencia.descricao,
     empresa: {
@@ -173,6 +186,48 @@ export function mapLogExecucaoRecord(
 }
 
 export function sortPendencias(left: PendenciaRecord, right: PendenciaRecord) {
+  return sortPendenciasBy(
+    left,
+    right,
+    PendenciaSortByEnum.PRIORIDADE,
+    SortDirectionEnum.ASC
+  );
+}
+
+export function sortPendenciasBy(
+  left: PendenciaRecord,
+  right: PendenciaRecord,
+  sortBy: PendenciaSortBy = PendenciaSortByEnum.PRIORIDADE,
+  sortDirection: SortDirection = SortDirectionEnum.ASC
+) {
+  const factor = sortDirection === SortDirectionEnum.DESC ? -1 : 1;
+  let primaryDelta = 0;
+
+  switch (sortBy) {
+    case PendenciaSortByEnum.ABERTA_EM:
+      primaryDelta = left.abertaEm.localeCompare(right.abertaEm) * factor;
+      break;
+    case PendenciaSortByEnum.ATUALIZADA_EM:
+      primaryDelta = left.updatedAt.localeCompare(right.updatedAt) * factor;
+      break;
+    case PendenciaSortByEnum.STATUS:
+      primaryDelta =
+        (PENDENCIA_STATUS_ORDER[left.status] - PENDENCIA_STATUS_ORDER[right.status]) *
+        factor;
+      break;
+    case PendenciaSortByEnum.PRIORIDADE:
+    default:
+      primaryDelta =
+        (PENDENCIA_PRIORITY_ORDER[left.prioridade] -
+          PENDENCIA_PRIORITY_ORDER[right.prioridade]) *
+        factor;
+      break;
+  }
+
+  if (primaryDelta !== 0) {
+    return primaryDelta;
+  }
+
   if (left.status !== right.status) {
     return left.status === 'ABERTA' ? -1 : 1;
   }

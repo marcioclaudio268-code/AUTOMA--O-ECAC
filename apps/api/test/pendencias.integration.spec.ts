@@ -233,6 +233,80 @@ describe('filtros da fila de pendencias persistida', () => {
       )
     ).toBe(true);
   }, TEST_TIMEOUT);
+
+  test('ordena e pagina a fila global de forma estavel', async () => {
+    const oldest = await createPendenciaScenario(prisma, {
+      abertaEm: new Date('2026-04-13T08:00:00.000Z'),
+      descricao: 'Primeira pendencia da pagina.',
+      prioridade: PrioridadePendencia.BAIXA,
+      responsavelInternoId: seededData.responsavelBId,
+      tipo: TipoPendencia.ACESSO
+    });
+    const middle = await createPendenciaScenario(prisma, {
+      abertaEm: new Date('2026-04-13T09:00:00.000Z'),
+      descricao: 'Segunda pendencia da pagina.',
+      prioridade: PrioridadePendencia.ALTA,
+      responsavelInternoId: seededData.responsavelBId,
+      tipo: TipoPendencia.OPERACIONAL
+    });
+    const newest = await createPendenciaScenario(prisma, {
+      abertaEm: new Date('2026-04-13T10:00:00.000Z'),
+      descricao: 'Terceira pendencia da pagina.',
+      prioridade: PrioridadePendencia.MEDIA,
+      responsavelInternoId: seededData.responsavelBId,
+      tipo: TipoPendencia.PROCURACAO
+    });
+
+    const firstPageResponse = await requestJson(
+      `/pendencias?responsavelInternoId=${seededData.responsavelBId}&status=ABERTA&sortBy=ABERTA_EM&sortDirection=DESC&take=2&page=1`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(firstPageResponse.response.status).toBe(200);
+    expect(firstPageResponse.body).toHaveLength(2);
+    expect(
+      (firstPageResponse.body as Array<{ id: string }>).map((item) => item.id)
+    ).toEqual([newest.pendenciaId, middle.pendenciaId]);
+
+    const secondPageResponse = await requestJson(
+      `/pendencias?responsavelInternoId=${seededData.responsavelBId}&status=ABERTA&sortBy=ABERTA_EM&sortDirection=DESC&take=2&page=2`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(secondPageResponse.response.status).toBe(200);
+    expect(secondPageResponse.body).toHaveLength(1);
+    expect(
+      (secondPageResponse.body as Array<{ id: string }>)[0]?.id
+    ).toBe(oldest.pendenciaId);
+
+    const priorityOrderResponse = await requestJson(
+      `/pendencias?responsavelInternoId=${seededData.responsavelBId}&status=ABERTA&sortBy=PRIORIDADE&sortDirection=ASC&take=3&page=1`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(priorityOrderResponse.response.status).toBe(200);
+    expect(
+      (
+        priorityOrderResponse.body as Array<{
+          id: string;
+          prioridade: PrioridadePendencia;
+        }>
+      ).map((item) => ({
+        id: item.id,
+        prioridade: item.prioridade
+      }))
+    ).toEqual([
+      { id: middle.pendenciaId, prioridade: PrioridadePendencia.ALTA },
+      { id: newest.pendenciaId, prioridade: PrioridadePendencia.MEDIA },
+      { id: oldest.pendenciaId, prioridade: PrioridadePendencia.BAIXA }
+    ]);
+  }, TEST_TIMEOUT);
 });
 
 describe('tratamento operacional de pendencias persistidas', () => {
@@ -375,6 +449,72 @@ describe('tratamento operacional de pendencias persistidas', () => {
     expect(log.resultado).toBe(ResultadoLogExecucao.SUCESSO);
     expect(log.resumo).toBe('Observacao registrada: Pendencia operacional de teste');
     expect(log.detalhes).toContain('Observacao operacional atualizada.');
+  }, TEST_TIMEOUT);
+
+  test('GET /pendencias/:id/logs retorna o historico auditavel da pendencia', async () => {
+    const scenario = await createPendenciaScenario(prisma, {
+      descricao: 'Observacao inicial da timeline.',
+      tipo: TipoPendencia.OPERACIONAL
+    });
+
+    await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        descricao: 'Observacao operacional da timeline.'
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    await wait(25);
+
+    await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        responsavelInternoId: seededData.responsavelBId
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    await wait(25);
+
+    await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        status: StatusPendencia.RESOLVIDA
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    const response = await requestJson(
+      `/pendencias/${scenario.pendenciaId}/logs?take=10`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(response.response.status).toBe(200);
+    expect(Array.isArray(response.body)).toBe(true);
+    expect(response.body).toHaveLength(3);
+
+    const logs = response.body as Array<{
+      pendenciaId: string | null;
+      resumo: string;
+      tipo: TipoLogExecucao;
+    }>;
+
+    expect(logs.every((log) => log.pendenciaId === scenario.pendenciaId)).toBe(
+      true
+    );
+    expect(logs.map((log) => log.resumo)).toEqual([
+      'Pendencia regularizada: Pendencia operacional de teste',
+      'Pendencia reatribuida: Pendencia operacional de teste',
+      'Observacao registrada: Pendencia operacional de teste'
+    ]);
+    expect(logs.map((log) => log.tipo)).toEqual([
+      TipoLogExecucao.REGULARIZACAO_PENDENCIA,
+      TipoLogExecucao.REGISTRO_PENDENCIA,
+      TipoLogExecucao.REGISTRO_PENDENCIA
+    ]);
   }, TEST_TIMEOUT);
 });
 
@@ -525,8 +665,10 @@ async function seedPendenciasData(
 async function createPendenciaScenario(
   database: PrismaClient,
   input: {
+    abertaEm?: Date;
     descricao: string;
     prioridade?: PrioridadePendencia;
+    responsavelInternoId?: string;
     tipo: TipoPendencia;
   }
 ): Promise<{ empresaId: string; pendenciaId: string }> {
@@ -540,7 +682,8 @@ async function createPendenciaScenario(
       pendenciaOperacional: input.tipo === TipoPendencia.OPERACIONAL,
       razaoSocial: `Empresa Pendencia ${companyIndex} Ltda`,
       regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
-      responsavelInternoId: seededData.responsavelAId,
+      responsavelInternoId:
+        input.responsavelInternoId ?? seededData.responsavelAId,
       statusAcesso: StatusAcessoEmpresa.DISPONIVEL,
       statusProcuracao: StatusProcuracaoEmpresa.VALIDA
     }
@@ -548,12 +691,13 @@ async function createPendenciaScenario(
 
   const pendencia = await database.pendencia.create({
     data: {
-      abertaEm: new Date('2026-04-13T10:00:00.000Z'),
+      abertaEm: input.abertaEm ?? new Date('2026-04-13T10:00:00.000Z'),
       descricao: input.descricao,
       empresaId: company.id,
       origem: 'MANUAL',
       prioridade: input.prioridade ?? PrioridadePendencia.MEDIA,
-      responsavelInternoId: seededData.responsavelAId,
+      responsavelInternoId:
+        input.responsavelInternoId ?? seededData.responsavelAId,
       status: StatusPendencia.ABERTA,
       tipo: input.tipo,
       titulo:
@@ -773,4 +917,10 @@ function isRetryableRemoveError(error: unknown): boolean {
 
   const code = (error as NodeJS.ErrnoException).code;
   return code === 'EBUSY' || code === 'EPERM' || code === 'ENOTEMPTY';
+}
+
+async function wait(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }

@@ -40,6 +40,14 @@ export type StatusPendencia = 'ABERTA' | 'RESOLVIDA';
 
 export type PrioridadePendencia = 'BAIXA' | 'MEDIA' | 'ALTA';
 
+export type PendenciaSortBy =
+  | 'PRIORIDADE'
+  | 'ABERTA_EM'
+  | 'ATUALIZADA_EM'
+  | 'STATUS';
+
+export type SortDirection = 'ASC' | 'DESC';
+
 export type TipoLogExecucao =
   | 'CONFERENCIA_OPERACIONAL'
   | 'REGISTRO_PENDENCIA'
@@ -94,7 +102,9 @@ export type DashboardSummaryResponse = {
 export type PendenciaRecord = {
   abertaEm: string;
   atualizadaPorUsuarioInternoId: string | null;
+  atualizadaPorUsuarioInternoNome: string | null;
   criadaPorUsuarioInternoId: string | null;
+  criadaPorUsuarioInternoNome: string | null;
   createdAt: string;
   descricao: string;
   empresaCnpj: string;
@@ -126,8 +136,11 @@ export type PendenciaListItem = PendenciaRecord;
 export type PendenciaListFilters = {
   criticidade?: PrioridadePendencia | undefined;
   empresaId?: string | undefined;
+  page?: number | undefined;
   prioridade?: PrioridadePendencia | undefined;
   responsavelInternoId?: string | undefined;
+  sortBy?: PendenciaSortBy | undefined;
+  sortDirection?: SortDirection | undefined;
   status?: StatusPendencia | undefined;
   take?: number | undefined;
   tipoPendencia?: TipoPendencia | undefined;
@@ -459,6 +472,7 @@ function appendPendenciaFilters(
   filters: PendenciaListFilters
 ) {
   appendQueryParam(params, 'empresaId', filters.empresaId);
+  appendQueryParam(params, 'page', filters.page);
   appendQueryParam(params, 'responsavelInternoId', filters.responsavelInternoId);
   appendQueryParam(params, 'status', filters.status);
   appendQueryParam(
@@ -466,6 +480,8 @@ function appendPendenciaFilters(
     'prioridade',
     filters.prioridade ?? filters.criticidade
   );
+  appendQueryParam(params, 'sortBy', filters.sortBy);
+  appendQueryParam(params, 'sortDirection', filters.sortDirection);
   appendQueryParam(params, 'tipoPendencia', filters.tipoPendencia);
   appendQueryParam(params, 'take', filters.take);
 }
@@ -637,6 +653,21 @@ export async function updatePendencia(
   });
 
   return normalizePendenciaRecord(pendencia);
+}
+
+export async function listPendenciaLogs(
+  id: string,
+  filters: { take?: number | undefined } = {}
+): Promise<LogExecucaoRecord[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'take', filters.take);
+
+  const query = params.toString();
+
+  return apiRequest<LogExecucaoRecord[]>(
+    query ? `/pendencias/${id}/logs?${query}` : `/pendencias/${id}/logs`
+  );
 }
 
 export async function listCompanyLogs(
