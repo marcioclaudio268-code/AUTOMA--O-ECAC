@@ -10,6 +10,7 @@ import {
   mapPendenciaRecord
 } from '../pendencias/pendencias.mappers';
 import {
+  type CompanyOperationalSnapshot,
   type CompanyOperationalHistory,
   type LogExecucaoRecord,
   type ResultadoLogExecucao,
@@ -102,42 +103,57 @@ export class LogsService {
     companyId: string,
     query: ListCompanyLogsQueryDto = {}
   ): Promise<CompanyOperationalHistory> {
-    const company = await this.assertCompanyExists(companyId);
     const take = query.take ?? 10;
 
-    const [logs, pendencias] = await Promise.all([
-      this.prisma.logExecucao.findMany({
-        include: logInclude,
-        orderBy: {
-          executadoEm: 'desc'
-        },
-        take,
-        where: {
-          empresaId: companyId
-        }
-      }),
-      this.prisma.pendencia.findMany({
-        include: pendenciaInclude,
-        orderBy: [
-          {
-            status: 'asc'
+    const [company, logs, pendenciasAbertas, pendenciasEncerradasRecentes] =
+      await Promise.all([
+        this.loadCompanyOperationalSnapshot(companyId),
+        this.prisma.logExecucao.findMany({
+          include: logInclude,
+          orderBy: {
+            executadoEm: 'desc'
           },
-          {
-            abertaEm: 'desc'
+          take,
+          where: {
+            empresaId: companyId
           }
-        ],
-        take,
-        where: {
-          empresaId: companyId
-        }
-      })
-    ]);
+        }),
+        this.prisma.pendencia.findMany({
+          include: pendenciaInclude,
+          orderBy: [
+            {
+              abertaEm: 'desc'
+            }
+          ],
+          take,
+          where: {
+            empresaId: companyId,
+            status: 'ABERTA'
+          }
+        }),
+        this.prisma.pendencia.findMany({
+          include: pendenciaInclude,
+          orderBy: [
+            {
+              fechadaEm: 'desc'
+            },
+            {
+              updatedAt: 'desc'
+            }
+          ],
+          take,
+          where: {
+            empresaId: companyId,
+            status: 'RESOLVIDA'
+          }
+        })
+      ]);
 
     return buildCompanyOperationalHistory(
-      company.id,
-      company.razaoSocial,
+      company,
       logs.map(mapLogExecucaoRecord),
-      pendencias.map(mapPendenciaRecord)
+      pendenciasAbertas.map(mapPendenciaRecord),
+      pendenciasEncerradasRecentes.map(mapPendenciaRecord)
     );
   }
 
@@ -148,6 +164,70 @@ export class LogsService {
 
     const normalized = value.trim();
     return normalized.length > 0 ? normalized : null;
+  }
+
+  private async loadCompanyOperationalSnapshot(
+    id: string
+  ): Promise<CompanyOperationalSnapshot> {
+    const company = await this.prisma.empresa.findUnique({
+      select: {
+        cnpj: true,
+        id: true,
+        naCarteira: true,
+        nomeFantasia: true,
+        observacoesOperacionais: true,
+        pendenciaOperacional: true,
+        razaoSocial: true,
+        regularizadaEm: true,
+        responsavelInterno: {
+          select: {
+            id: true,
+            nome: true
+          }
+        },
+        responsavelInternoId: true,
+        statusAcesso: true,
+        statusProcuracao: true,
+        ultimaConferenciaAcessoEm: true,
+        ultimaConferenciaOperacionalEm: true,
+        ultimaConferenciaProcuracaoEm: true,
+        ultimaVarreduraEm: true,
+        ultimoEventoRelevanteEm: true,
+        updatedAt: true
+      },
+      where: {
+        id
+      }
+    });
+
+    if (!company) {
+      throw new NotFoundException('Empresa nao encontrada.');
+    }
+
+    return {
+      cnpj: company.cnpj,
+      empresaId: company.id,
+      empresaNome: company.razaoSocial,
+      naCarteira: company.naCarteira,
+      nomeFantasia: company.nomeFantasia,
+      observacoesOperacionais: company.observacoesOperacionais,
+      pendenciaOperacional: company.pendenciaOperacional,
+      regularizadaEm: company.regularizadaEm?.toISOString() ?? null,
+      responsavelInternoId: company.responsavelInternoId,
+      responsavelInternoNome: company.responsavelInterno?.nome?.trim() ?? null,
+      statusAcesso: company.statusAcesso,
+      statusProcuracao: company.statusProcuracao,
+      ultimaConferenciaAcessoEm:
+        company.ultimaConferenciaAcessoEm?.toISOString() ?? null,
+      ultimaConferenciaOperacionalEm:
+        company.ultimaConferenciaOperacionalEm?.toISOString() ?? null,
+      ultimaConferenciaProcuracaoEm:
+        company.ultimaConferenciaProcuracaoEm?.toISOString() ?? null,
+      ultimaVarreduraEm: company.ultimaVarreduraEm?.toISOString() ?? null,
+      ultimoEventoRelevanteEm:
+        company.ultimoEventoRelevanteEm?.toISOString() ?? null,
+      updatedAt: company.updatedAt.toISOString()
+    };
   }
 
   private async assertCompanyExists(

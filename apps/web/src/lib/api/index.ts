@@ -199,11 +199,36 @@ export type LogExecucaoRecord = {
   tipo: TipoLogExecucao;
 };
 
+export type CompanyOperationalSnapshot = {
+  cnpj: string;
+  empresaId: string;
+  empresaNome: string;
+  naCarteira: boolean;
+  nomeFantasia: string | null;
+  observacoesOperacionais: string | null;
+  pendenciaOperacional: boolean;
+  regularizadaEm: string | null;
+  responsavelInternoId: string | null;
+  responsavelInternoNome: string | null;
+  statusAcesso: StatusAcessoEmpresa;
+  statusProcuracao: StatusProcuracaoEmpresa;
+  ultimaConferenciaAcessoEm: string | null;
+  ultimaConferenciaOperacionalEm: string | null;
+  ultimaConferenciaProcuracaoEm: string | null;
+  ultimaVarreduraEm: string | null;
+  ultimoEventoRelevanteEm: string | null;
+  updatedAt: string;
+};
+
 export type CompanyOperationalHistory = {
+  empresa: CompanyOperationalSnapshot;
   empresaId: string;
   empresaNome: string;
   logs: LogExecucaoRecord[];
   pendencias: PendenciaRecord[];
+  pendenciasAbertas: PendenciaRecord[];
+  pendenciasEncerradasRecentes: PendenciaRecord[];
+  ultimoLog: LogExecucaoRecord | null;
 };
 
 export type PendenciaOperacionalRecord = PendenciaRecord;
@@ -702,7 +727,11 @@ export async function getCompanyOperationalHistory(
 
   return {
     ...history,
-    pendencias: normalizePendenciaRecords(history.pendencias)
+    pendencias: normalizePendenciaRecords(history.pendencias),
+    pendenciasAbertas: normalizePendenciaRecords(history.pendenciasAbertas),
+    pendenciasEncerradasRecentes: normalizePendenciaRecords(
+      history.pendenciasEncerradasRecentes
+    )
   };
 }
 

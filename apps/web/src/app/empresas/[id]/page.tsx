@@ -9,8 +9,8 @@ import {
   executeManualScan,
   createCompanyPendencia,
   getCompany,
+  getCompanyOperationalHistory,
   listEventosOperacionais,
-  listCompanyLogs,
   listCompanyPendencias,
   listResponsaveis,
   listVarreduras,
@@ -20,6 +20,7 @@ import {
   type CompanyCreateInput,
   type CompanyIntegration,
   type CompanyDetailItem,
+  type CompanyOperationalHistory,
   type CompanyUpdateInput,
   type EventoOperacionalRecord,
   type LogExecucaoRecord,
@@ -433,7 +434,8 @@ export default function CompanyDetailPage() {
   const [eventosOperacionais, setEventosOperacionais] = useState<
     EventoOperacionalRecord[]
   >([]);
-  const [logsExecucao, setLogsExecucao] = useState<LogExecucaoRecord[]>([]);
+  const [operationalHistory, setOperationalHistory] =
+    useState<CompanyOperationalHistory | null>(null);
   const [pendenciasOperacionais, setPendenciasOperacionais] = useState<
     PendenciaOperacionalRecord[]
   >([]);
@@ -528,14 +530,16 @@ export default function CompanyDetailPage() {
           }
 
           try {
-            const logs = await listCompanyLogs(companyId);
+            const history = await getCompanyOperationalHistory(companyId, {
+              take: 6
+            });
 
             if (active) {
-              setLogsExecucao(logs);
+              setOperationalHistory(history);
             }
           } catch {
             if (active) {
-              setLogsExecucao([]);
+              setOperationalHistory(null);
             }
           }
 
@@ -775,10 +779,12 @@ export default function CompanyDetailPage() {
     }
 
     try {
-      const logs = await listCompanyLogs(companyId);
-      setLogsExecucao(logs);
+      const history = await getCompanyOperationalHistory(companyId, {
+        take: 6
+      });
+      setOperationalHistory(history);
     } catch {
-      setLogsExecucao([]);
+      setOperationalHistory(null);
     }
 
     try {
@@ -862,6 +868,11 @@ export default function CompanyDetailPage() {
   }
 
   const operationalAttention = company ? describeOperationalAttention(company) : null;
+  const pendenciasAbertas = operationalHistory?.pendenciasAbertas ?? [];
+  const pendenciasEncerradasRecentes =
+    operationalHistory?.pendenciasEncerradasRecentes ?? [];
+  const logsRecentes = operationalHistory?.logs ?? [];
+  const ultimoLogRelevante = operationalHistory?.ultimoLog ?? null;
 
   if (loading) {
     return (
@@ -877,13 +888,14 @@ export default function CompanyDetailPage() {
         <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
             <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-500">
-              ECAC AUTOMAÇÃO
+              ECAC AUTOMACAO
             </p>
             <h1 className="text-3xl font-semibold text-slate-950">
               {company?.razaoSocial ?? 'Detalhe da empresa'}
             </h1>
             <p className="text-sm text-slate-600">
-              Visualizacao e edicao basica do cadastro operacional.
+              Dossie operacional consolidado da empresa, com leitura direta do
+              estado atual, das pendencias e do historico recente.
             </p>
           </div>
 
@@ -1135,6 +1147,341 @@ export default function CompanyDetailPage() {
                   atualizam o painel de pendencias na proxima consulta.
                 </p>
               </aside>
+            </div>
+          </section>
+        ) : null}
+
+        {company ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">
+                  Dossie operacional
+                </p>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  Contexto consolidado da empresa
+                </h2>
+                <p className="max-w-3xl text-sm leading-6 text-slate-600">
+                  Leitura direta do snapshot atual, das pendencias em aberto, das
+                  ultimas regularizacoes e dos registros mais recentes da
+                  operacao.
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                {ultimoLogRelevante ? (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                      Ultimo movimento
+                    </p>
+                    <p className="font-medium text-slate-900">
+                      {formatLogTypeLabel(ultimoLogRelevante.tipo)}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      {formatDateTime(ultimoLogRelevante.executadoEm)} -{' '}
+                      {ultimoLogRelevante.executadoPorUsuarioInternoNome}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                      Ultimo movimento
+                    </p>
+                    <p className="font-medium text-slate-900">
+                      Sem log operacional recente
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <StatusCard
+                label="Status de acesso"
+                note="Leitura atual do cadastro operacional."
+                tone={getAccessTone(company.statusAcesso)}
+                value={STATUS_ACESSO_LABELS[company.statusAcesso]}
+              />
+              <StatusCard
+                label="Status de procuracao"
+                note="Leitura atual do cadastro operacional."
+                tone={getProcuracaoTone(company.statusProcuracao)}
+                value={STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
+              />
+              <StatusCard
+                label="Pendencias abertas"
+                note="Itens ainda pendentes de tratamento."
+                tone={pendenciasAbertas.length > 0 ? 'danger' : 'success'}
+                value={String(pendenciasAbertas.length)}
+              />
+              <StatusCard
+                label="Ultimas encerradas"
+                note="Pendencias resolvidas recentemente."
+                tone={
+                  pendenciasEncerradasRecentes.length > 0 ? 'neutral' : 'success'
+                }
+                value={String(pendenciasEncerradasRecentes.length)}
+              />
+            </div>
+
+            <div className="mt-5 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-4 sm:grid sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Ultima conferencia
+                      </p>
+                      <p className="text-sm font-medium text-slate-900">
+                        {formatOperationalDate(
+                          company.ultimaConferenciaOperacionalEm
+                        )}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Ultima regularizacao
+                      </p>
+                      <p className="text-sm font-medium text-slate-900">
+                        {formatOperationalDate(company.regularizadaEm)}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Responsavel atual
+                      </p>
+                      <p className="text-sm font-medium text-slate-900">
+                        {company.responsavelInterno?.nome ?? 'Sem responsavel'}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Na carteira
+                      </p>
+                      <p className="text-sm font-medium text-slate-900">
+                        {company.naCarteira ? 'Sim' : 'Nao'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Observacoes operacionais atuais
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Contexto manual consolidado da empresa.
+                      </p>
+                    </div>
+                    <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Snapshot atual
+                    </span>
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                    {formatOperationalText(company.observacoesOperacionais)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Ultimos logs relevantes
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Quem mexeu por ultimo, quando e com qual resultado.
+                      </p>
+                    </div>
+                    <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      {logsRecentes.length} registro(s)
+                    </span>
+                  </div>
+                  {logsRecentes.length === 0 ? (
+                    <p className="mt-3 rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-600">
+                      Nenhum log operacional recente registrado.
+                    </p>
+                  ) : (
+                    <ul className="mt-3 space-y-3">
+                      {logsRecentes.slice(0, 4).map((log) => (
+                        <li
+                          className="rounded-xl border border-slate-200 bg-white p-4"
+                          key={log.id}
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                              <p className="text-sm font-semibold text-slate-900">
+                                {log.resumo}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {formatDateTime(log.executadoEm)} -{' '}
+                                {log.executadoPorUsuarioInternoNome}
+                              </p>
+                            </div>
+                            <span
+                              className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                getLogTone(log.resultado)
+                              )}`}
+                            >
+                              {formatLogResultLabel(log.resultado)}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-500">
+                            {formatLogTypeLabel(log.tipo)}
+                          </p>
+                          {log.detalhes ? (
+                            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                              {log.detalhes}
+                            </p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Pendencias abertas
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Itens que ainda exigem tratamento nesta empresa.
+                      </p>
+                    </div>
+                    <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      {pendenciasAbertas.length} aberta(s)
+                    </span>
+                  </div>
+                  {pendenciasAbertas.length === 0 ? (
+                    <p className="mt-3 rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-600">
+                      Nenhuma pendencia aberta no dossie atual.
+                    </p>
+                  ) : (
+                    <ul className="mt-3 space-y-3">
+                      {pendenciasAbertas.map((pendencia) => (
+                        <li
+                          className="rounded-xl border border-slate-200 bg-white p-4"
+                          key={pendencia.id}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap gap-2">
+                              <span
+                                className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                  getPendenciaCriticidadeTone(
+                                    pendencia.criticidade
+                                  )
+                                )}`}
+                              >
+                                {formatPendenciaCriticidadeLabel(
+                                  pendencia.criticidade
+                                )}
+                              </span>
+                              <span
+                                className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                  getPendenciaTone(pendencia.status)
+                                )}`}
+                              >
+                                {formatPendenciaStatusLabel(pendencia.status)}
+                              </span>
+                            </div>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {pendencia.titulo}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {formatPendenciaTypeLabel(pendencia.tipo)} - aberta
+                              em {formatDateTime(pendencia.abertaEm)}
+                            </p>
+                            <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                              {pendencia.descricao}
+                            </p>
+                            <div className="flex justify-end">
+                              <button
+                                className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={isSaving}
+                                onClick={() =>
+                                  void handleResolvePendencia(pendencia.id)
+                                }
+                                type="button"
+                              >
+                                {resolvingPendenciaId === pendencia.id && isSaving
+                                  ? 'Resolvendo...'
+                                  : 'Marcar como resolvida'}
+                              </button>
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Ultimas pendencias encerradas
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Regularizacoes recentes para leitura rapida do historico.
+                      </p>
+                    </div>
+                    <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      {pendenciasEncerradasRecentes.length} encerrada(s)
+                    </span>
+                  </div>
+                  {pendenciasEncerradasRecentes.length === 0 ? (
+                    <p className="mt-3 rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-600">
+                      Nenhuma pendencia encerrada recentemente.
+                    </p>
+                  ) : (
+                    <ul className="mt-3 space-y-3">
+                      {pendenciasEncerradasRecentes.map((pendencia) => (
+                        <li
+                          className="rounded-xl border border-slate-200 bg-white p-4"
+                          key={pendencia.id}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap gap-2">
+                              <span
+                                className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                  getPendenciaTone(pendencia.status)
+                                )}`}
+                              >
+                                {formatPendenciaStatusLabel(pendencia.status)}
+                              </span>
+                              <span
+                                className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                  getPendenciaCriticidadeTone(
+                                    pendencia.criticidade
+                                  )
+                                )}`}
+                              >
+                                {formatPendenciaCriticidadeLabel(
+                                  pendencia.criticidade
+                                )}
+                              </span>
+                            </div>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {pendencia.titulo}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {formatPendenciaTypeLabel(pendencia.tipo)} - encerrada
+                              em {formatOperationalDate(pendencia.fechadaEm)}
+                            </p>
+                            <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                              {pendencia.descricao}
+                            </p>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
             </div>
           </section>
         ) : null}
@@ -1487,16 +1834,16 @@ export default function CompanyDetailPage() {
                     </p>
                   </div>
                   <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    {logsExecucao.length} registro(s)
+                    {logsRecentes.length} registro(s)
                   </span>
                 </div>
-                {logsExecucao.length === 0 ? (
+                {logsRecentes.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
                     Nenhum log operacional recente registrado.
                   </p>
                 ) : (
                   <ul className="space-y-3">
-                    {logsExecucao.map((log) => (
+                    {logsRecentes.map((log) => (
                       <li
                         className="rounded-2xl border border-slate-200 bg-white p-4"
                         key={log.id}

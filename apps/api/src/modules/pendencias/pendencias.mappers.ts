@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 
 import {
+  type CompanyOperationalSnapshot,
   SortDirectionEnum,
   PendenciaSortByEnum,
   SEM_RESPONSAVEL_LABEL,
@@ -251,15 +252,19 @@ export function sortPendenciasBy(
 }
 
 export function buildCompanyOperationalHistory(
-  empresaId: string,
-  empresaNome: string,
+  empresa: CompanyOperationalSnapshot,
   logs: LogExecucaoRecord[],
-  pendencias: PendenciaRecord[]
+  pendenciasAbertas: PendenciaRecord[],
+  pendenciasEncerradasRecentes: PendenciaRecord[]
 ): CompanyOperationalHistory {
   return {
-    empresaId,
-    empresaNome,
+    empresa,
+    empresaId: empresa.empresaId,
+    empresaNome: empresa.empresaNome,
     logs,
-    pendencias
+    pendencias: [...pendenciasAbertas, ...pendenciasEncerradasRecentes],
+    pendenciasAbertas,
+    pendenciasEncerradasRecentes,
+    ultimoLog: logs[0] ?? null
   };
 }

@@ -48,6 +48,7 @@ type RequestOptions = {
 type SeededCompanyTraceabilityData = {
   empresaCheckId: string;
   empresaCreateId: string;
+  responsavelId: string;
   empresaRegularizeId: string;
   empresaRemoveId: string;
   pendenciaRegularizeId: string;
@@ -239,7 +240,11 @@ describe('rastreabilidade operacional da empresa', () => {
 
     expect(historyResponse.response.status).toBe(200);
     expect(historyResponse.body).toMatchObject({
-      empresaId: seededData.empresaCreateId
+      empresaId: seededData.empresaCreateId,
+      empresa: {
+        empresaId: seededData.empresaCreateId,
+        pendenciaOperacional: true
+      }
     });
     expect(
       (historyResponse.body as { logs: unknown[]; pendencias: unknown[] }).logs
@@ -248,6 +253,162 @@ describe('rastreabilidade operacional da empresa', () => {
       (historyResponse.body as { logs: unknown[]; pendencias: unknown[] })
         .pendencias
     ).toHaveLength(1);
+    expect(
+      (
+        historyResponse.body as {
+          pendenciasAbertas: unknown[];
+          pendenciasEncerradasRecentes: unknown[];
+          ultimoLog: unknown;
+        }
+      ).pendenciasAbertas
+    ).toHaveLength(1);
+    expect(
+      (
+        historyResponse.body as {
+          pendenciasAbertas: unknown[];
+          pendenciasEncerradasRecentes: unknown[];
+          ultimoLog: unknown;
+        }
+      ).pendenciasEncerradasRecentes
+    ).toHaveLength(0);
+    expect(
+      (
+        historyResponse.body as {
+          pendenciasAbertas: unknown[];
+          pendenciasEncerradasRecentes: unknown[];
+          ultimoLog: { pendenciaId: string | null; tipo: TipoLogExecucao } | null;
+        }
+      ).ultimoLog
+    ).toMatchObject({
+      pendenciaId: pendencia.id,
+      tipo: TipoLogExecucao.REGISTRO_PENDENCIA
+    });
+  }, TEST_TIMEOUT);
+
+  test('operational-history consolida snapshot, pendencias abertas, encerradas recentes e ultimo log', async () => {
+    const empresa = await prisma.empresa.create({
+      data: {
+        cnpj: '55555555000135',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Dossie',
+        observacoesOperacionais: 'Contato feito. Aguardando retorno do cliente.',
+        pendenciaOperacional: true,
+        razaoSocial: 'Empresa Dossie Operacional Ltda',
+        regularizadaEm: new Date('2026-04-11T09:30:00.000Z'),
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: seededData.responsavelId,
+        statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
+        statusProcuracao: StatusProcuracaoEmpresa.PENDENTE,
+        ultimaConferenciaOperacionalEm: new Date('2026-04-12T08:00:00.000Z')
+      }
+    });
+
+    const pendenciaAberta = await prisma.pendencia.create({
+      data: {
+        abertaEm: new Date('2026-04-12T10:00:00.000Z'),
+        descricao: 'Pendencia aberta no dossie operacional.',
+        empresaId: empresa.id,
+        origem: 'MANUAL',
+        prioridade: PrioridadePendencia.ALTA,
+        responsavelInternoId: seededData.responsavelId,
+        status: StatusPendencia.ABERTA,
+        tipo: TipoPendencia.OPERACIONAL,
+        titulo: 'Pendencia operacional aberta'
+      }
+    });
+
+    const pendenciaResolvida = await prisma.pendencia.create({
+      data: {
+        abertaEm: new Date('2026-04-10T10:00:00.000Z'),
+        descricao: 'Pendencia resolvida no dossie operacional.',
+        empresaId: empresa.id,
+        fechadaEm: new Date('2026-04-12T16:00:00.000Z'),
+        origem: 'MANUAL',
+        prioridade: PrioridadePendencia.MEDIA,
+        responsavelInternoId: seededData.responsavelId,
+        status: StatusPendencia.RESOLVIDA,
+        tipo: TipoPendencia.ACESSO,
+        titulo: 'Pendencia de acesso resolvida'
+      }
+    });
+
+    await prisma.logExecucao.create({
+      data: {
+        detalhes: 'Conferencia operacional registrada no dossie.',
+        empresaId: empresa.id,
+        executadoEm: new Date('2026-04-12T11:00:00.000Z'),
+        pendenciaId: pendenciaAberta.id,
+        resultado: ResultadoLogExecucao.SUCESSO,
+        resumo: 'Conferencia operacional registrada.',
+        tipo: TipoLogExecucao.CONFERENCIA_OPERACIONAL
+      }
+    });
+
+    await prisma.logExecucao.create({
+      data: {
+        detalhes: 'Pendencia de acesso resolvida no fluxo consolidado.',
+        empresaId: empresa.id,
+        executadoEm: new Date('2026-04-12T17:00:00.000Z'),
+        pendenciaId: pendenciaResolvida.id,
+        resultado: ResultadoLogExecucao.SUCESSO,
+        resumo: 'Pendencia regularizada: Pendencia de acesso resolvida',
+        tipo: TipoLogExecucao.REGULARIZACAO_PENDENCIA
+      }
+    });
+
+    const response = await requestJson(
+      `/companies/${empresa.id}/operational-history?take=5`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      empresaId: empresa.id,
+      empresaNome: empresa.razaoSocial,
+      empresa: {
+        empresaId: empresa.id,
+        empresaNome: empresa.razaoSocial,
+        observacoesOperacionais:
+          'Contato feito. Aguardando retorno do cliente.',
+        pendenciaOperacional: true,
+        regularizadaEm: '2026-04-11T09:30:00.000Z',
+        responsavelInternoId: seededData.responsavelId,
+        statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
+        statusProcuracao: StatusProcuracaoEmpresa.PENDENTE,
+        ultimaConferenciaOperacionalEm: '2026-04-12T08:00:00.000Z'
+      }
+    });
+
+    const history = response.body as {
+      logs: Array<{ id: string; resumo: string }>;
+      pendenciasAbertas: Array<{ id: string; status: StatusPendencia }>;
+      pendenciasEncerradasRecentes: Array<{
+        fechadaEm: string | null;
+        id: string;
+        status: StatusPendencia;
+      }>;
+      ultimoLog: { id: string; resumo: string } | null;
+    };
+
+    expect(history.logs).toHaveLength(2);
+    expect(history.pendenciasAbertas).toEqual([
+      expect.objectContaining({
+        id: pendenciaAberta.id,
+        status: StatusPendencia.ABERTA
+      })
+    ]);
+    expect(history.pendenciasEncerradasRecentes).toEqual([
+      expect.objectContaining({
+        fechadaEm: '2026-04-12T16:00:00.000Z',
+        id: pendenciaResolvida.id,
+        status: StatusPendencia.RESOLVIDA
+      })
+    ]);
+    expect(history.ultimoLog).toMatchObject({
+      resumo: 'Pendencia regularizada: Pendencia de acesso resolvida'
+    });
   }, TEST_TIMEOUT);
 
   test('conferir agora grava LogExecucao e atualiza ultimaConferenciaOperacionalEm', async () => {
@@ -509,6 +670,7 @@ async function seedCompanyTraceabilityData(
   return {
     empresaCheckId: empresaCheck.id,
     empresaCreateId: empresaCreate.id,
+    responsavelId: responsavel.id,
     empresaRegularizeId: empresaRegularize.id,
     empresaRemoveId: empresaRemove.id,
     pendenciaRegularizeId: pendenciaRegularize.id
