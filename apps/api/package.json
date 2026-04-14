@@ -11,7 +11,8 @@
     "db:migrate": "dotenv -e ../../.env.local -- prisma migrate deploy --schema src/prisma/schema.prisma",
     "db:migrate:dev": "dotenv -e ../../.env.local -- prisma migrate dev --schema src/prisma/schema.prisma",
     "db:status": "dotenv -e ../../.env.local -- prisma migrate status --schema src/prisma/schema.prisma",
-    "db:seed": "dotenv -e ../../.env.local -- tsx src/prisma/seed.ts"
+    "db:seed": "dotenv -e ../../.env.local -- tsx src/prisma/seed.ts",
+    "import:carteira": "dotenv -e ../../.env.local -- tsx scripts/import-carteira-from-xlsx.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.5",
@@ -29,6 +30,7 @@
     "pino": "^9.3.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {
