@@ -100,6 +100,42 @@ export class CreateCompanyDto {
   )
   @IsOptional()
   @IsDateString({}, {
+    message: 'certificadoDigitalImplementadoEm invalida.'
+  })
+  certificadoDigitalImplementadoEm?: string | null;
+
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || null : value
+  )
+  @IsOptional()
+  @IsDateString({}, {
+    message: 'certificadoDigitalValidoAte invalida.'
+  })
+  certificadoDigitalValidoAte?: string | null;
+
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || null : value
+  )
+  @IsOptional()
+  @IsDateString({}, {
+    message: 'procuracaoImplementadaEm invalida.'
+  })
+  procuracaoImplementadaEm?: string | null;
+
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || null : value
+  )
+  @IsOptional()
+  @IsDateString({}, {
+    message: 'procuracaoValidaAte invalida.'
+  })
+  procuracaoValidaAte?: string | null;
+
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || null : value
+  )
+  @IsOptional()
+  @IsDateString({}, {
     message: 'regularizadaEm invalida.'
   })
   regularizadaEm?: string | null;

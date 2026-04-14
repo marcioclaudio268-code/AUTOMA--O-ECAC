@@ -157,6 +157,10 @@ model Empresa {
   ultimaConferenciaAcessoEm DateTime?
   ultimaConferenciaOperacionalEm DateTime?
   ultimaConferenciaProcuracaoEm DateTime?
+  certificadoDigitalImplementadoEm DateTime?
+  certificadoDigitalValidoAte DateTime?
+  procuracaoImplementadaEm DateTime?
+  procuracaoValidaAte DateTime?
   regularizadaEm          DateTime?
   ultimaVarreduraEm       DateTime?
   ultimoEventoRelevanteEm DateTime?
