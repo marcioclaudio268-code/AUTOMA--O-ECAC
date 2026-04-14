@@ -14,6 +14,7 @@ import {
   listResponsaveis,
   listVarreduras,
   registerCompanyCheck,
+  registerCompanyOperationalReview,
   regularizeCompanyOperationalIssue,
   updateCompany,
   type CompanyCreateInput,
@@ -63,6 +64,7 @@ type CompanyFormState = {
 type OperationalQuickAction =
   | 'executarVarreduraManual'
   | 'registrarConferencia'
+  | 'registrarRevisaoOperacional'
   | 'marcarAcessoDisponivel'
   | 'marcarProcuracaoValida'
   | 'regularizarPendenciaOperacional'
@@ -261,6 +263,8 @@ function formatLogTypeLabel(value: LogExecucaoRecord['tipo']) {
       return 'Registro de pendencia';
     case 'REGULARIZACAO_PENDENCIA':
       return 'Regularizacao de pendencia';
+    case 'REVISAO_OPERACIONAL':
+      return 'Revisao operacional';
     case 'RETIRADA_CARTEIRA':
     default:
       return 'Retirada da carteira';
@@ -696,6 +700,13 @@ export default function CompanyDetailPage() {
           'Conferencia operacional registrada agora.'
         );
         break;
+      case 'registrarRevisaoOperacional':
+        await runOperationalAction(
+          action,
+          () => registerCompanyOperationalReview(companyId),
+          'Revisao operacional registrada.'
+        );
+        break;
       case 'marcarAcessoDisponivel':
         await persistCompanyUpdate(
           {
@@ -1030,6 +1041,23 @@ export default function CompanyDetailPage() {
                   sair da empresa.
                 </p>
                 <div className="grid gap-3">
+                  <div className="space-y-1">
+                    <button
+                      className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={isSaving}
+                      onClick={() =>
+                        void handleQuickAction('registrarRevisaoOperacional')
+                      }
+                      type="button"
+                    >
+                      {activeQuickAction === 'registrarRevisaoOperacional'
+                        ? 'Registrando...'
+                        : 'Registrar revisao operacional'}
+                    </button>
+                    <p className="text-xs leading-5 text-slate-500">
+                      Registra uma revisao sem encerrar a pendencia.
+                    </p>
+                  </div>
                   <button
                     className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={isSaving}

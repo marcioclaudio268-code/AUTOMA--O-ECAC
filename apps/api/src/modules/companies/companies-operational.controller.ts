@@ -23,6 +23,19 @@ export class CompaniesOperationalController {
     );
   }
 
+  @Post('review')
+  registerOperationalReview(
+    @Param('companyId') companyId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() body?: CompanyOperationalActionDto
+  ) {
+    return this.pendenciasService.registerCompanyOperationalReview(
+      companyId,
+      request.user?.id,
+      body?.chaveIdempotencia
+    );
+  }
+
   @Post('regularize')
   regularizeOperationalPendencia(
     @Param('companyId') companyId: string,

@@ -789,6 +789,144 @@ describe('rastreabilidade operacional da empresa', () => {
     ).toHaveLength(0);
   }, TEST_TIMEOUT);
 
+  test('revisao operacional registra LogExecucao sem encerrar pendencia aberta', async () => {
+    const empresa = await prisma.empresa.create({
+      data: {
+        cnpj: '55555555000146',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Revisao Operacional',
+        pendenciaOperacional: true,
+        razaoSocial: 'Empresa Revisao Operacional Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: seededData.responsavelId,
+        statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
+        statusProcuracao: StatusProcuracaoEmpresa.PENDENTE,
+        ultimaConferenciaOperacionalEm: new Date(
+          '2026-04-13T08:00:00.000Z'
+        )
+      }
+    });
+
+    const pendencia = await prisma.pendencia.create({
+      data: {
+        abertaEm: new Date('2026-04-13T07:00:00.000Z'),
+        descricao: 'Pendencia operacional aberta para revisao.',
+        empresaId: empresa.id,
+        origem: 'MANUAL',
+        prioridade: PrioridadePendencia.ALTA,
+        responsavelInternoId: seededData.responsavelId,
+        status: StatusPendencia.ABERTA,
+        tipo: TipoPendencia.OPERACIONAL,
+        titulo: 'Pendencia operacional em revisao'
+      }
+    });
+
+    const response = await requestJson(
+      `/companies/${empresa.id}/operational/review`,
+      {
+        body: {
+          chaveIdempotencia: 'company-review'
+        },
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(response.response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      updatedAt: expect.any(String)
+    });
+
+    const persisted = await prisma.empresa.findUnique({
+      select: {
+        pendenciaOperacional: true,
+        regularizadaEm: true,
+        ultimaConferenciaOperacionalEm: true
+      },
+      where: {
+        id: empresa.id
+      }
+    });
+
+    expect(persisted).toMatchObject({
+      pendenciaOperacional: true,
+      regularizadaEm: null
+    });
+    expect(
+      persisted?.ultimaConferenciaOperacionalEm?.toISOString()
+    ).toBe('2026-04-13T08:00:00.000Z');
+
+    const pendenciaPersistida = await prisma.pendencia.findUnique({
+      where: {
+        id: pendencia.id
+      }
+    });
+
+    expect(pendenciaPersistida).toMatchObject({
+      status: StatusPendencia.ABERTA
+    });
+    expect(pendenciaPersistida?.fechadaEm).toBeNull();
+
+    const logs = await prisma.logExecucao.findMany({
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        empresaId: empresa.id,
+        tipo: TipoLogExecucao.REVISAO_OPERACIONAL
+      }
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      resultado: ResultadoLogExecucao.SUCESSO,
+      resumo: 'Revisao operacional registrada.',
+      tipo: TipoLogExecucao.REVISAO_OPERACIONAL
+    });
+    expect(logs[0]?.detalhes).toContain(
+      'Nova revisao operacional registrada sem alterar pendencia ou conferencia.'
+    );
+
+    const historyResponse = await requestJson(
+      `/companies/${empresa.id}/operational-history`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(historyResponse.response.status).toBe(200);
+    expect(historyResponse.body).toMatchObject({
+      empresaId: empresa.id,
+      empresa: {
+        empresaId: empresa.id,
+        pendenciaOperacional: true,
+        ultimaConferenciaOperacionalEm: '2026-04-13T08:00:00.000Z'
+      }
+    });
+    expect(historyResponse.body).toMatchObject({
+      ultimoLog: {
+        tipo: TipoLogExecucao.REVISAO_OPERACIONAL
+      }
+    });
+    expect(
+      (historyResponse.body as { logs: unknown[]; pendenciasAbertas: unknown[] })
+        .logs
+    ).toHaveLength(1);
+    expect(
+      (
+        historyResponse.body as {
+          logs: Array<{ tipo: string }>;
+          pendenciasAbertas: unknown[];
+        }
+      ).logs[0]?.tipo
+    ).toBe(TipoLogExecucao.REVISAO_OPERACIONAL);
+    expect(
+      (
+        historyResponse.body as { pendenciasAbertas: unknown[] }
+      ).pendenciasAbertas
+    ).toHaveLength(1);
+  }, TEST_TIMEOUT);
+
   test('regularizar pendencia fecha Pendencia, grava LogExecucao e ajusta o resumo da empresa', async () => {
     const response = await requestJson(
       `/companies/${seededData.empresaRegularizeId}/operational/regularize`,

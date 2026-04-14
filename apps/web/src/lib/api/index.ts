@@ -53,6 +53,7 @@ export type TipoLogExecucao =
   | 'EDICAO_MANUAL_EMPRESA'
   | 'REGISTRO_PENDENCIA'
   | 'REGULARIZACAO_PENDENCIA'
+  | 'REVISAO_OPERACIONAL'
   | 'RETIRADA_CARTEIRA';
 
 export type ResultadoLogExecucao = 'FALHA' | 'SEM_ALTERACAO' | 'SUCESSO';
@@ -742,6 +743,19 @@ export async function registerCompanyCheck(
 ): Promise<CompanyOperationalMutationResponse> {
   return apiRequest<CompanyOperationalMutationResponse>(
     `/companies/${companyId}/operational/check`,
+    {
+      body: payload,
+      method: 'POST'
+    }
+  );
+}
+
+export async function registerCompanyOperationalReview(
+  companyId: string,
+  payload: CompanyOperationalActionInput = {}
+): Promise<CompanyOperationalMutationResponse> {
+  return apiRequest<CompanyOperationalMutationResponse>(
+    `/companies/${companyId}/operational/review`,
     {
       body: payload,
       method: 'POST'
