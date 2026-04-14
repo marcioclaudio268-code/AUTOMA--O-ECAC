@@ -49,6 +49,10 @@ import {
   type VigenciaOperacionalStatus
 } from '@/lib/vigencia-operacional';
 import { validateCompanyForm } from '@/lib/validators';
+import {
+  describeOperationalAttention,
+  resolveOperationalPendenciaAberta
+} from './operational-pendencia';
 
 type CompanyFormState = {
   cnpj: string;
@@ -441,42 +445,6 @@ function getIntegrationTone(
   }
 }
 
-function describeOperationalAttention(company: CompanyDetailItem) {
-  const items: string[] = [];
-  let tone: StatusTone = 'success';
-
-  if (company.statusAcesso !== 'DISPONIVEL') {
-    items.push(`Acesso: ${STATUS_ACESSO_LABELS[company.statusAcesso]}`);
-    tone = company.statusAcesso === 'NAO_VERIFICADO' ? tone : 'danger';
-  }
-
-  if (company.statusProcuracao !== 'VALIDA') {
-    items.push(`Procuracao: ${STATUS_PROCURACAO_LABELS[company.statusProcuracao]}`);
-    tone = company.statusProcuracao === 'NAO_VERIFICADA' && tone !== 'danger'
-      ? 'warning'
-      : 'danger';
-  }
-
-  if (company.pendenciaOperacional) {
-    items.push('Pendencia operacional aberta');
-    tone = 'danger';
-  }
-
-  if (items.length === 0) {
-    return {
-      items,
-      tone: 'success' as const,
-      title: 'Estado operacional regular'
-    };
-  }
-
-  return {
-    items,
-    tone,
-    title: tone === 'danger' ? 'Tratamento requerido' : 'Acompanhar confirmacao'
-  };
-}
-
 function StatusCard({
   label,
   note,
@@ -524,7 +492,6 @@ export default function CompanyDetailPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [flashMessage, setFlashMessage] = useState('');
-  const isOperationalCheckBlocked = company?.pendenciaOperacional === true;
 
   useEffect(() => {
     const paramsSearch = new URLSearchParams(window.location.search);
@@ -915,7 +882,14 @@ export default function CompanyDetailPage() {
     }
   }
 
-  const operationalAttention = company ? describeOperationalAttention(company) : null;
+  const hasOpenOperationalPendencias = resolveOperationalPendenciaAberta(
+    company,
+    operationalHistory
+  );
+  const isOperationalCheckBlocked = hasOpenOperationalPendencias;
+  const operationalAttention = company
+    ? describeOperationalAttention(company, hasOpenOperationalPendencias)
+    : null;
   const certificadoDigitalVigencia: VigenciaOperacionalStatus = company
     ? formatVigenciaStatus(company.certificadoDigitalValidoAte)
     : 'SEM_INFORMACAO';
@@ -1086,12 +1060,12 @@ export default function CompanyDetailPage() {
                   <StatusCard
                     label="Pendencia operacional"
                     note={
-                      company.pendenciaOperacional
+                      hasOpenOperationalPendencias
                         ? 'A fila deve tratar'
                         : 'Sem pendencia aberta'
                     }
-                    tone={getPendenciaFlagTone(company.pendenciaOperacional)}
-                    value={company.pendenciaOperacional ? 'Aberta' : 'Fechada'}
+                    tone={getPendenciaFlagTone(hasOpenOperationalPendencias)}
+                    value={hasOpenOperationalPendencias ? 'Aberta' : 'Fechada'}
                   />
                   <StatusCard
                     label="Responsavel interno"
