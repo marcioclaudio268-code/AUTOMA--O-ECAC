@@ -10,9 +10,13 @@ type ResponsavelFormInput = {
 
 type CompanyFormInput = {
   cnpj: string;
+  certificadoDigitalImplementadoEm?: string;
+  certificadoDigitalValidoAte?: string;
   ultimaConferenciaAcessoEm?: string;
   ultimaConferenciaOperacionalEm?: string;
   ultimaConferenciaProcuracaoEm?: string;
+  procuracaoImplementadaEm?: string;
+  procuracaoValidaAte?: string;
   razaoSocial: string;
   responsavelInternoId: string;
 };
@@ -119,6 +123,43 @@ export function validateCompanyForm(
     Number.isNaN(new Date(ultimaConferenciaProcuracaoEm).getTime())
   ) {
     return 'Informe uma data de conferencia de procuracao valida.';
+  }
+
+  const certificadoDigitalImplementadoEm =
+    form.certificadoDigitalImplementadoEm?.trim();
+
+  if (
+    certificadoDigitalImplementadoEm &&
+    Number.isNaN(new Date(certificadoDigitalImplementadoEm).getTime())
+  ) {
+    return 'Informe uma data de certificado digital valida.';
+  }
+
+  const certificadoDigitalValidoAte = form.certificadoDigitalValidoAte?.trim();
+
+  if (
+    certificadoDigitalValidoAte &&
+    Number.isNaN(new Date(certificadoDigitalValidoAte).getTime())
+  ) {
+    return 'Informe uma data de validade de certificado digital valida.';
+  }
+
+  const procuracaoImplementadaEm = form.procuracaoImplementadaEm?.trim();
+
+  if (
+    procuracaoImplementadaEm &&
+    Number.isNaN(new Date(procuracaoImplementadaEm).getTime())
+  ) {
+    return 'Informe uma data de procuracao valida.';
+  }
+
+  const procuracaoValidaAte = form.procuracaoValidaAte?.trim();
+
+  if (
+    procuracaoValidaAte &&
+    Number.isNaN(new Date(procuracaoValidaAte).getTime())
+  ) {
+    return 'Informe uma data de validade de procuracao valida.';
   }
 
   return null;

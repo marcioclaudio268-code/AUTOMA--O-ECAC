@@ -419,9 +419,15 @@ describe('rastreabilidade operacional da empresa', () => {
     const empresa = await prisma.empresa.create({
       data: {
         cnpj: '66666666000116',
+        certificadoDigitalImplementadoEm: new Date(
+          '2026-04-10T09:00:00.000Z'
+        ),
+        certificadoDigitalValidoAte: new Date('2026-05-20T09:00:00.000Z'),
         naCarteira: true,
         nomeFantasia: 'Empresa Edicao Manual',
         pendenciaOperacional: false,
+        procuracaoImplementadaEm: new Date('2026-04-02T09:00:00.000Z'),
+        procuracaoValidaAte: new Date('2026-04-20T09:00:00.000Z'),
         razaoSocial: 'Empresa Edicao Manual Ltda',
         regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
         responsavelInternoId: seededData.responsavelId,
@@ -430,12 +436,28 @@ describe('rastreabilidade operacional da empresa', () => {
       }
     });
 
+    const initialResponse = await requestJson(`/companies/${empresa.id}`, {
+      cookie: sessionCookie
+    });
+
+    expect(initialResponse.response.status).toBe(200);
+    expect(initialResponse.body).toMatchObject({
+      certificadoDigitalImplementadoEm: '2026-04-10T09:00:00.000Z',
+      certificadoDigitalValidoAte: '2026-05-20T09:00:00.000Z',
+      procuracaoImplementadaEm: '2026-04-02T09:00:00.000Z',
+      procuracaoValidaAte: '2026-04-20T09:00:00.000Z'
+    });
+
     const response = await requestJson(`/companies/${empresa.id}`, {
       body: {
+        certificadoDigitalImplementadoEm: '2026-04-11T10:00:00.000Z',
+        certificadoDigitalValidoAte: '2026-05-31T10:00:00.000Z',
         nomeFantasia: 'Empresa Edicao Manual Revisada',
         observacoesOperacionais:
           'Cliente avisado. Aguardando regularizacao do acesso.',
         pendenciaOperacional: true,
+        procuracaoImplementadaEm: '2026-04-12T10:00:00.000Z',
+        procuracaoValidaAte: '2026-04-28T10:00:00.000Z',
         statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
         statusProcuracao: StatusProcuracaoEmpresa.PENDENTE,
         ultimaConferenciaOperacionalEm: '2026-04-13T11:00:00.000Z'
@@ -451,6 +473,10 @@ describe('rastreabilidade operacional da empresa', () => {
       observacoesOperacionais:
         'Cliente avisado. Aguardando regularizacao do acesso.',
       pendenciaOperacional: true,
+      certificadoDigitalImplementadoEm: '2026-04-11T10:00:00.000Z',
+      certificadoDigitalValidoAte: '2026-05-31T10:00:00.000Z',
+      procuracaoImplementadaEm: '2026-04-12T10:00:00.000Z',
+      procuracaoValidaAte: '2026-04-28T10:00:00.000Z',
       statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
       statusProcuracao: StatusProcuracaoEmpresa.PENDENTE,
       ultimaConferenciaOperacionalEm: '2026-04-13T11:00:00.000Z'
@@ -458,9 +484,13 @@ describe('rastreabilidade operacional da empresa', () => {
 
     const persisted = await prisma.empresa.findUnique({
       select: {
+        certificadoDigitalImplementadoEm: true,
+        certificadoDigitalValidoAte: true,
         nomeFantasia: true,
         observacoesOperacionais: true,
         pendenciaOperacional: true,
+        procuracaoImplementadaEm: true,
+        procuracaoValidaAte: true,
         statusAcesso: true,
         statusProcuracao: true,
         ultimaConferenciaOperacionalEm: true
@@ -479,8 +509,27 @@ describe('rastreabilidade operacional da empresa', () => {
       statusProcuracao: StatusProcuracaoEmpresa.PENDENTE
     });
     expect(
+      persisted?.certificadoDigitalImplementadoEm?.toISOString()
+    ).toBe('2026-04-11T10:00:00.000Z');
+    expect(persisted?.certificadoDigitalValidoAte?.toISOString()).toBe(
+      '2026-05-31T10:00:00.000Z'
+    );
+    expect(persisted?.procuracaoImplementadaEm?.toISOString()).toBe(
+      '2026-04-12T10:00:00.000Z'
+    );
+    expect(persisted?.procuracaoValidaAte?.toISOString()).toBe(
+      '2026-04-28T10:00:00.000Z'
+    );
+    expect(
       persisted?.ultimaConferenciaOperacionalEm?.toISOString()
     ).toBe('2026-04-13T11:00:00.000Z');
+
+    expect(response.body).toMatchObject({
+      certificadoDigitalImplementadoEm: '2026-04-11T10:00:00.000Z',
+      certificadoDigitalValidoAte: '2026-05-31T10:00:00.000Z',
+      procuracaoImplementadaEm: '2026-04-12T10:00:00.000Z',
+      procuracaoValidaAte: '2026-04-28T10:00:00.000Z'
+    });
 
     const logs = await prisma.logExecucao.findMany({
       include: {
@@ -515,6 +564,18 @@ describe('rastreabilidade operacional da empresa', () => {
     );
     expect(logs[0]?.detalhes).toContain(
       'Pendencia operacional alterada de nao para sim.'
+    );
+    expect(logs[0]?.detalhes).toContain(
+      'Certificado digital implementado em alterado de 2026-04-10T09:00:00.000Z para 2026-04-11T10:00:00.000Z.'
+    );
+    expect(logs[0]?.detalhes).toContain(
+      'Certificado digital valido ate alterado de 2026-05-20T09:00:00.000Z para 2026-05-31T10:00:00.000Z.'
+    );
+    expect(logs[0]?.detalhes).toContain(
+      'Procuracao implementada em alterada de 2026-04-02T09:00:00.000Z para 2026-04-12T10:00:00.000Z.'
+    );
+    expect(logs[0]?.detalhes).toContain(
+      'Procuracao valida ate alterada de 2026-04-20T09:00:00.000Z para 2026-04-28T10:00:00.000Z.'
     );
     expect(logs[0]?.detalhes).toContain(
       'Observacoes operacionais atualizadas.'
@@ -562,6 +623,49 @@ describe('rastreabilidade operacional da empresa', () => {
     });
 
     expect(logsAfterNoChange).toHaveLength(1);
+  }, TEST_TIMEOUT);
+
+  test('edicao manual aceita vigencias vazias sem gerar log extra', async () => {
+    const empresa = await prisma.empresa.create({
+      data: {
+        cnpj: '66666666000117',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Edicao Manual Vazia',
+        pendenciaOperacional: false,
+        razaoSocial: 'Empresa Edicao Manual Vazia Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: seededData.responsavelId,
+        statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
+        statusProcuracao: StatusProcuracaoEmpresa.NAO_VERIFICADA
+      }
+    });
+
+    const response = await requestJson(`/companies/${empresa.id}`, {
+      body: {
+        certificadoDigitalImplementadoEm: null,
+        certificadoDigitalValidoAte: null,
+        procuracaoImplementadaEm: null,
+        procuracaoValidaAte: null
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      certificadoDigitalImplementadoEm: null,
+      certificadoDigitalValidoAte: null,
+      procuracaoImplementadaEm: null,
+      procuracaoValidaAte: null
+    });
+
+    const logs = await prisma.logExecucao.findMany({
+      where: {
+        empresaId: empresa.id
+      }
+    });
+
+    expect(logs).toHaveLength(0);
   }, TEST_TIMEOUT);
 
   test('edicao manual de empresa importada sem responsavel interno gera trilha legivel', async () => {

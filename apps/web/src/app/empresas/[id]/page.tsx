@@ -43,17 +43,26 @@ import {
   formatDateTime,
   toDateTimeLocalValue
 } from '@/lib/formatters';
+import {
+  classifyVigenciaOperacional,
+  formatVigenciaOperacionalLabel,
+  type VigenciaOperacionalStatus
+} from '@/lib/vigencia-operacional';
 import { validateCompanyForm } from '@/lib/validators';
 
 type CompanyFormState = {
   cnpj: string;
   naCarteira: boolean;
   pendenciaOperacional: boolean;
+  certificadoDigitalImplementadoEm: string;
+  certificadoDigitalValidoAte: string;
   nomeFantasia: string;
   observacoesOperacionais: string;
   ultimaConferenciaAcessoEm: string;
   ultimaConferenciaOperacionalEm: string;
   ultimaConferenciaProcuracaoEm: string;
+  procuracaoImplementadaEm: string;
+  procuracaoValidaAte: string;
   razaoSocial: string;
   regimeTributario: RegimeTributario;
   responsavelInternoId: string;
@@ -74,11 +83,15 @@ const initialFormState: CompanyFormState = {
   cnpj: '',
   naCarteira: false,
   pendenciaOperacional: false,
+  certificadoDigitalImplementadoEm: '',
+  certificadoDigitalValidoAte: '',
   nomeFantasia: '',
   observacoesOperacionais: '',
   ultimaConferenciaAcessoEm: '',
   ultimaConferenciaOperacionalEm: '',
   ultimaConferenciaProcuracaoEm: '',
+  procuracaoImplementadaEm: '',
+  procuracaoValidaAte: '',
   razaoSocial: '',
   regimeTributario: 'SIMPLES_NACIONAL',
   responsavelInternoId: '',
@@ -93,6 +106,12 @@ function buildPayload(form: CompanyFormState): CompanyCreateInput {
   return {
     cnpj: form.cnpj.trim(),
     naCarteira: form.naCarteira,
+    certificadoDigitalImplementadoEm: form.certificadoDigitalImplementadoEm.trim()
+      ? new Date(form.certificadoDigitalImplementadoEm).toISOString()
+      : null,
+    certificadoDigitalValidoAte: form.certificadoDigitalValidoAte.trim()
+      ? new Date(form.certificadoDigitalValidoAte).toISOString()
+      : null,
     pendenciaOperacional: form.pendenciaOperacional,
     nomeFantasia: form.nomeFantasia.trim() || undefined,
     observacoesOperacionais: form.observacoesOperacionais.trim() || undefined,
@@ -104,6 +123,12 @@ function buildPayload(form: CompanyFormState): CompanyCreateInput {
       : null,
     ultimaConferenciaProcuracaoEm: form.ultimaConferenciaProcuracaoEm.trim()
       ? new Date(form.ultimaConferenciaProcuracaoEm).toISOString()
+      : null,
+    procuracaoImplementadaEm: form.procuracaoImplementadaEm.trim()
+      ? new Date(form.procuracaoImplementadaEm).toISOString()
+      : null,
+    procuracaoValidaAte: form.procuracaoValidaAte.trim()
+      ? new Date(form.procuracaoValidaAte).toISOString()
       : null,
     razaoSocial: form.razaoSocial.trim(),
     regimeTributario: form.regimeTributario,
@@ -117,6 +142,12 @@ function toFormState(company: CompanyDetailItem): CompanyFormState {
   return {
     cnpj: company.cnpj,
     naCarteira: company.naCarteira,
+    certificadoDigitalImplementadoEm: toDateTimeLocalValue(
+      company.certificadoDigitalImplementadoEm
+    ),
+    certificadoDigitalValidoAte: toDateTimeLocalValue(
+      company.certificadoDigitalValidoAte
+    ),
     pendenciaOperacional: company.pendenciaOperacional,
     nomeFantasia: company.nomeFantasia ?? '',
     observacoesOperacionais: company.observacoesOperacionais ?? '',
@@ -129,6 +160,10 @@ function toFormState(company: CompanyDetailItem): CompanyFormState {
     ultimaConferenciaProcuracaoEm: toDateTimeLocalValue(
       company.ultimaConferenciaProcuracaoEm
     ),
+    procuracaoImplementadaEm: toDateTimeLocalValue(
+      company.procuracaoImplementadaEm
+    ),
+    procuracaoValidaAte: toDateTimeLocalValue(company.procuracaoValidaAte),
     razaoSocial: company.razaoSocial,
     regimeTributario: company.regimeTributario,
     responsavelInternoId: company.responsavelInterno?.id ?? '',
@@ -150,6 +185,43 @@ function formatOperationalDate(value: string | null | undefined) {
 function formatOperationalText(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : 'Sem observacoes.';
+}
+
+function formatVigenciaStatus(
+  value: string | null | undefined
+): VigenciaOperacionalStatus {
+  return classifyVigenciaOperacional(value);
+}
+
+function getVigenciaTone(
+  value: VigenciaOperacionalStatus
+): StatusTone {
+  switch (value) {
+    case 'REGULAR':
+      return 'success';
+    case 'A_VENCER':
+      return 'warning';
+    case 'VENCIDO':
+      return 'danger';
+    case 'SEM_INFORMACAO':
+    default:
+      return 'neutral';
+  }
+}
+
+function buildVigenciaNote(
+  implementadoEm: string | null | undefined,
+  validoAte: string | null | undefined
+): string {
+  const parts = [`Implantado em ${formatOperationalDate(implementadoEm)}`];
+
+  if (validoAte) {
+    parts.push(`Valido ate ${formatOperationalDate(validoAte)}`);
+  } else {
+    parts.push('Validade nao informada');
+  }
+
+  return parts.join(' - ');
 }
 
 function formatScanOutcome(value: string | null | undefined) {
@@ -844,6 +916,12 @@ export default function CompanyDetailPage() {
   }
 
   const operationalAttention = company ? describeOperationalAttention(company) : null;
+  const certificadoDigitalVigencia: VigenciaOperacionalStatus = company
+    ? formatVigenciaStatus(company.certificadoDigitalValidoAte)
+    : 'SEM_INFORMACAO';
+  const procuracaoVigencia: VigenciaOperacionalStatus = company
+    ? formatVigenciaStatus(company.procuracaoValidaAte)
+    : 'SEM_INFORMACAO';
   const pendenciasAbertas = operationalHistory?.pendenciasAbertas ?? [];
   const pendenciasEncerradasRecentes =
     operationalHistory?.pendenciasEncerradasRecentes ?? [];
@@ -1029,6 +1107,36 @@ export default function CompanyDetailPage() {
                         : 'Sem responsavel'
                     }
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">
+                    Vigencias manuais
+                  </p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <StatusCard
+                      label="Certificado digital"
+                      note={buildVigenciaNote(
+                        company.certificadoDigitalImplementadoEm,
+                        company.certificadoDigitalValidoAte
+                      )}
+                      tone={getVigenciaTone(certificadoDigitalVigencia)}
+                      value={formatVigenciaOperacionalLabel(
+                        certificadoDigitalVigencia
+                      )}
+                    />
+                    <StatusCard
+                      label="Procuracao"
+                      note={buildVigenciaNote(
+                        company.procuracaoImplementadaEm,
+                        company.procuracaoValidaAte
+                      )}
+                      tone={getVigenciaTone(procuracaoVigencia)}
+                      value={formatVigenciaOperacionalLabel(
+                        procuracaoVigencia
+                      )}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1559,6 +1667,38 @@ export default function CompanyDetailPage() {
                 </div>
                 <div className="space-y-1">
                   <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Certificado digital implementado em
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.certificadoDigitalImplementadoEm)}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Certificado digital valido ate
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.certificadoDigitalValidoAte)}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Procuracao implementada em
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.procuracaoImplementadaEm)}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Procuracao valida ate
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.procuracaoValidaAte)}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
                     Na carteira
                   </dt>
                   <dd className="text-sm font-medium text-slate-900">
@@ -2038,6 +2178,80 @@ export default function CompanyDetailPage() {
                         }
                         type="datetime-local"
                         value={form.ultimaConferenciaOperacionalEm}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid gap-4 md:col-span-2 md:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Certificado digital implementado em
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="certificadoDigitalImplementadoEm"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            certificadoDigitalImplementadoEm: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.certificadoDigitalImplementadoEm}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Certificado digital valido ate
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="certificadoDigitalValidoAte"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            certificadoDigitalValidoAte: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.certificadoDigitalValidoAte}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Procuracao implementada em
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="procuracaoImplementadaEm"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            procuracaoImplementadaEm: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.procuracaoImplementadaEm}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Procuracao valida ate
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="procuracaoValidaAte"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            procuracaoValidaAte: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.procuracaoValidaAte}
                       />
                     </label>
                   </div>

@@ -102,6 +102,13 @@ export class CompaniesService {
       naCarteira: dto.naCarteira ?? false,
       pendenciaOperacional: dto.pendenciaOperacional ?? false,
       observacoesOperacionais: dto.observacoesOperacionais?.trim() || null,
+      certificadoDigitalImplementadoEm:
+        this.normalizeDate(dto.certificadoDigitalImplementadoEm) ?? null,
+      certificadoDigitalValidoAte:
+        this.normalizeDate(dto.certificadoDigitalValidoAte) ?? null,
+      procuracaoImplementadaEm:
+        this.normalizeDate(dto.procuracaoImplementadaEm) ?? null,
+      procuracaoValidaAte: this.normalizeDate(dto.procuracaoValidaAte) ?? null,
       ultimaConferenciaAcessoEm:
         this.normalizeDate(dto.ultimaConferenciaAcessoEm) ?? null,
       ultimaConferenciaOperacionalEm:
@@ -203,6 +210,10 @@ export class CompaniesService {
         dto.pendenciaOperacional,
         dto.razaoSocial,
         dto.regimeTributario,
+        dto.certificadoDigitalImplementadoEm,
+        dto.certificadoDigitalValidoAte,
+        dto.procuracaoImplementadaEm,
+        dto.procuracaoValidaAte,
         dto.responsavelInternoId,
         dto.statusAcesso,
         dto.statusProcuracao,
@@ -305,6 +316,86 @@ export class CompaniesService {
             `Ultima conferencia de procuracao alterada de ${formatDateAuditValue(
               currentCompany.ultimaConferenciaProcuracaoEm
             )} para ${formatDateAuditValue(ultimaConferenciaProcuracaoEm)}.`
+          );
+        }
+      }
+
+      if (dto.certificadoDigitalImplementadoEm !== undefined) {
+        const certificadoDigitalImplementadoEm = this.normalizeDate(
+          dto.certificadoDigitalImplementadoEm
+        );
+
+        if (
+          certificadoDigitalImplementadoEm !== undefined &&
+          !areSameDate(
+            currentCompany.certificadoDigitalImplementadoEm,
+            certificadoDigitalImplementadoEm
+          )
+        ) {
+          data.certificadoDigitalImplementadoEm =
+            certificadoDigitalImplementadoEm;
+          auditDetails.push(
+            `Certificado digital implementado em alterado de ${formatDateAuditValue(
+              currentCompany.certificadoDigitalImplementadoEm
+            )} para ${formatDateAuditValue(certificadoDigitalImplementadoEm)}.`
+          );
+        }
+      }
+
+      if (dto.certificadoDigitalValidoAte !== undefined) {
+        const certificadoDigitalValidoAte = this.normalizeDate(
+          dto.certificadoDigitalValidoAte
+        );
+
+        if (
+          certificadoDigitalValidoAte !== undefined &&
+          !areSameDate(
+            currentCompany.certificadoDigitalValidoAte,
+            certificadoDigitalValidoAte
+          )
+        ) {
+          data.certificadoDigitalValidoAte = certificadoDigitalValidoAte;
+          auditDetails.push(
+            `Certificado digital valido ate alterado de ${formatDateAuditValue(
+              currentCompany.certificadoDigitalValidoAte
+            )} para ${formatDateAuditValue(certificadoDigitalValidoAte)}.`
+          );
+        }
+      }
+
+      if (dto.procuracaoImplementadaEm !== undefined) {
+        const procuracaoImplementadaEm = this.normalizeDate(
+          dto.procuracaoImplementadaEm
+        );
+
+        if (
+          procuracaoImplementadaEm !== undefined &&
+          !areSameDate(
+            currentCompany.procuracaoImplementadaEm,
+            procuracaoImplementadaEm
+          )
+        ) {
+          data.procuracaoImplementadaEm = procuracaoImplementadaEm;
+          auditDetails.push(
+            `Procuracao implementada em alterada de ${formatDateAuditValue(
+              currentCompany.procuracaoImplementadaEm
+            )} para ${formatDateAuditValue(procuracaoImplementadaEm)}.`
+          );
+        }
+      }
+
+      if (dto.procuracaoValidaAte !== undefined) {
+        const procuracaoValidaAte = this.normalizeDate(dto.procuracaoValidaAte);
+
+        if (
+          procuracaoValidaAte !== undefined &&
+          !areSameDate(currentCompany.procuracaoValidaAte, procuracaoValidaAte)
+        ) {
+          data.procuracaoValidaAte = procuracaoValidaAte;
+          auditDetails.push(
+            `Procuracao valida ate alterada de ${formatDateAuditValue(
+              currentCompany.procuracaoValidaAte
+            )} para ${formatDateAuditValue(procuracaoValidaAte)}.`
           );
         }
       }

@@ -286,10 +286,14 @@ export type CompanyBase = {
   cnpj: string;
   createdAt: string;
   id: string;
+  certificadoDigitalImplementadoEm: string | null;
+  certificadoDigitalValidoAte: string | null;
   naCarteira: boolean;
   pendenciaOperacional: boolean;
   nomeFantasia: string | null;
   observacoesOperacionais: string | null;
+  procuracaoImplementadaEm: string | null;
+  procuracaoValidaAte: string | null;
   razaoSocial: string;
   regimeTributario: RegimeTributario;
   responsavelInternoId: string | null;
@@ -328,9 +332,13 @@ export type CompanyDetailItem = CompanyBase & {
 
 export type CompanyCreateInput = {
   cnpj: string;
+  certificadoDigitalImplementadoEm?: string | null | undefined;
+  certificadoDigitalValidoAte?: string | null | undefined;
   naCarteira?: boolean | undefined;
   nomeFantasia?: string | undefined;
   observacoesOperacionais?: string | undefined;
+  procuracaoImplementadaEm?: string | null | undefined;
+  procuracaoValidaAte?: string | null | undefined;
   razaoSocial: string;
   regimeTributario: RegimeTributario;
   responsavelInternoId?: string | null | undefined;
