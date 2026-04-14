@@ -1,5 +1,6 @@
 import {
   Injectable,
+  ConflictException,
   NotFoundException
 } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -102,6 +103,9 @@ const DEFAULT_PRIORITIES: Record<
   OPERACIONAL: PrioridadePendenciaEnum.ALTA,
   PROCURACAO: PrioridadePendenciaEnum.MEDIA
 };
+
+const OPERATIONAL_CHECK_BLOCKED_MESSAGE =
+  'Nao e possivel registrar conferencia operacional enquanto houver pendencia operacional aberta.';
 
 @Injectable()
 export class PendenciasService {
@@ -545,7 +549,12 @@ export class PendenciasService {
     chaveIdempotencia?: string | null
   ): Promise<{ updatedAt: string }> {
     return this.prisma.$transaction(async (client) => {
-      await this.assertCompanyExists(client, companyId);
+      const company = await this.assertCompanyExists(client, companyId);
+
+      if (company.pendenciaOperacional) {
+        throw new ConflictException(OPERATIONAL_CHECK_BLOCKED_MESSAGE);
+      }
+
       const now = new Date();
 
       await client.empresa.update({
