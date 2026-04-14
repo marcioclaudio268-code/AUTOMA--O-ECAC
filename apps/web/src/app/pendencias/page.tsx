@@ -246,6 +246,8 @@ function formatLogTypeLabel(value: LogExecucaoRecord['tipo']): string {
       return 'Registro de pendencia';
     case 'REGULARIZACAO_PENDENCIA':
       return 'Regularizacao de pendencia';
+    case 'REVISAO_OPERACIONAL':
+      return 'Revisao operacional';
     case 'RETIRADA_CARTEIRA':
     default:
       return 'Retirada da carteira';

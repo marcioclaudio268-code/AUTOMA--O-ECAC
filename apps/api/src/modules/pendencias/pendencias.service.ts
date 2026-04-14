@@ -106,6 +106,9 @@ const DEFAULT_PRIORITIES: Record<
 
 const OPERATIONAL_CHECK_BLOCKED_MESSAGE =
   'Nao e possivel registrar conferencia operacional enquanto houver pendencia operacional aberta.';
+const OPERATIONAL_REVIEW_SUMMARY = 'Revisao operacional registrada.';
+const OPERATIONAL_REVIEW_DETAILS =
+  'Nova revisao operacional registrada sem alterar pendencia ou conferencia.';
 
 @Injectable()
 export class PendenciasService {
@@ -574,6 +577,32 @@ export class PendenciasService {
         resultado: ResultadoLogExecucaoEnum.SUCESSO,
         resumo: 'Conferencia operacional registrada.',
         tipo: TipoLogExecucaoEnum.CONFERENCIA_OPERACIONAL
+      });
+
+      return {
+        updatedAt: now.toISOString()
+      };
+    });
+  }
+
+  async registerCompanyOperationalReview(
+    companyId: string,
+    executadoPorUsuarioInternoId?: string | null,
+    chaveIdempotencia?: string | null
+  ): Promise<{ updatedAt: string }> {
+    return this.prisma.$transaction(async (client) => {
+      await this.assertCompanyExists(client, companyId);
+      const now = new Date();
+
+      await this.logsService.recordExecution(client, {
+        chaveIdempotencia,
+        detalhes: OPERATIONAL_REVIEW_DETAILS,
+        empresaId: companyId,
+        executadoEm: now,
+        executadoPorUsuarioInternoId,
+        resultado: ResultadoLogExecucaoEnum.SUCESSO,
+        resumo: OPERATIONAL_REVIEW_SUMMARY,
+        tipo: TipoLogExecucaoEnum.REVISAO_OPERACIONAL
       });
 
       return {
