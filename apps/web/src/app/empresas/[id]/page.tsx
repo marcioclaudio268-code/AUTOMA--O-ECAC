@@ -84,6 +84,9 @@ const initialFormState: CompanyFormState = {
   statusProcuracao: 'NAO_VERIFICADA'
 };
 
+const OPERATIONAL_CHECK_BLOCKED_MESSAGE =
+  'Nao e possivel registrar conferencia operacional enquanto houver pendencia operacional aberta.';
+
 function buildPayload(form: CompanyFormState): CompanyCreateInput {
   return {
     cnpj: form.cnpj.trim(),
@@ -445,6 +448,7 @@ export default function CompanyDetailPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [flashMessage, setFlashMessage] = useState('');
+  const isOperationalCheckBlocked = company?.pendenciaOperacional === true;
 
   useEffect(() => {
     const paramsSearch = new URLSearchParams(window.location.search);
@@ -674,6 +678,13 @@ export default function CompanyDetailPage() {
   async function handleQuickAction(action: OperationalQuickAction) {
     if (!companyId) {
       setError('Empresa invalida.');
+      return;
+    }
+
+    if (action === 'registrarConferencia' && isOperationalCheckBlocked) {
+      setError(OPERATIONAL_CHECK_BLOCKED_MESSAGE);
+      setMessage('');
+      setFlashMessage('');
       return;
     }
 
@@ -1024,21 +1035,35 @@ export default function CompanyDetailPage() {
                     disabled={isSaving}
                     onClick={() => void handleManualScan()}
                     type="button"
-                  >
+                    >
                     {activeQuickAction === 'executarVarreduraManual'
                       ? 'Executando...'
                       : 'Executar varredura manual'}
                   </button>
-                  <button
-                    className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={isSaving}
-                    onClick={() => void handleQuickAction('registrarConferencia')}
-                    type="button"
-                  >
-                    {activeQuickAction === 'registrarConferencia'
-                      ? 'Registrando...'
-                      : 'Registrar conferencia agora'}
-                  </button>
+                  <div className="space-y-1">
+                    <button
+                      className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={isSaving || isOperationalCheckBlocked}
+                      onClick={() =>
+                        void handleQuickAction('registrarConferencia')
+                      }
+                      title={
+                        isOperationalCheckBlocked
+                          ? OPERATIONAL_CHECK_BLOCKED_MESSAGE
+                          : undefined
+                      }
+                      type="button"
+                    >
+                      {activeQuickAction === 'registrarConferencia'
+                        ? 'Registrando...'
+                        : 'Registrar conferencia agora'}
+                    </button>
+                    {isOperationalCheckBlocked ? (
+                      <p className="text-xs leading-5 text-rose-700">
+                        {OPERATIONAL_CHECK_BLOCKED_MESSAGE}
+                      </p>
+                    ) : null}
+                  </div>
                   <button
                     className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={isSaving}

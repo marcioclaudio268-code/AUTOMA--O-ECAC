@@ -32,6 +32,8 @@ const TEST_TIMEOUT = 120_000;
 const ADMIN_EMAIL = 'admin@ecac.local';
 const ADMIN_PASSWORD = 'admin123';
 const JWT_SECRET = 'company-traceability-integration-secret';
+const OPERATIONAL_CHECK_BLOCKED_MESSAGE =
+  'Nao e possivel registrar conferencia operacional enquanto houver pendencia operacional aberta.';
 const TEST_DATABASE_NAME =
   'ecac_automacao_company_traceability_integration';
 const API_ROOT = process.cwd();
@@ -689,6 +691,102 @@ describe('rastreabilidade operacional da empresa', () => {
       resultado: ResultadoLogExecucao.SUCESSO,
       tipo: TipoLogExecucao.CONFERENCIA_OPERACIONAL
     });
+  }, TEST_TIMEOUT);
+
+  test('conferir agora e bloqueada quando a empresa possui pendencia operacional aberta', async () => {
+    const empresa = await prisma.empresa.create({
+      data: {
+        cnpj: '55555555000145',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Conferencia Bloqueada',
+        pendenciaOperacional: true,
+        razaoSocial: 'Empresa Conferencia Bloqueada Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: seededData.responsavelId,
+        statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
+        statusProcuracao: StatusProcuracaoEmpresa.PENDENTE,
+        ultimaConferenciaOperacionalEm: new Date(
+          '2026-04-13T08:00:00.000Z'
+        )
+      }
+    });
+
+    await prisma.pendencia.create({
+      data: {
+        abertaEm: new Date('2026-04-13T07:00:00.000Z'),
+        descricao: 'Pendencia operacional aberta para bloqueio da conferencia.',
+        empresaId: empresa.id,
+        origem: 'MANUAL',
+        prioridade: PrioridadePendencia.ALTA,
+        responsavelInternoId: seededData.responsavelId,
+        status: StatusPendencia.ABERTA,
+        tipo: TipoPendencia.OPERACIONAL,
+        titulo: 'Pendencia operacional bloqueante'
+      }
+    });
+
+    const response = await requestJson(
+      `/companies/${empresa.id}/operational/check`,
+      {
+        body: {
+          chaveIdempotencia: 'company-check-blocked'
+        },
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(response.response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      error: 'Conflict',
+      message: OPERATIONAL_CHECK_BLOCKED_MESSAGE,
+      statusCode: 409
+    });
+
+    const persisted = await prisma.empresa.findUnique({
+      select: {
+        pendenciaOperacional: true,
+        ultimaConferenciaOperacionalEm: true
+      },
+      where: {
+        id: empresa.id
+      }
+    });
+
+    expect(persisted).toMatchObject({
+      pendenciaOperacional: true
+    });
+    expect(
+      persisted?.ultimaConferenciaOperacionalEm?.toISOString()
+    ).toBe('2026-04-13T08:00:00.000Z');
+
+    const logs = await prisma.logExecucao.findMany({
+      where: {
+        empresaId: empresa.id,
+        tipo: TipoLogExecucao.CONFERENCIA_OPERACIONAL
+      }
+    });
+
+    expect(logs).toHaveLength(0);
+
+    const historyResponse = await requestJson(
+      `/companies/${empresa.id}/operational-history`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(historyResponse.response.status).toBe(200);
+    expect(historyResponse.body).toMatchObject({
+      empresaId: empresa.id,
+      empresa: {
+        empresaId: empresa.id,
+        pendenciaOperacional: true
+      }
+    });
+    expect(
+      (historyResponse.body as { logs: unknown[] }).logs
+    ).toHaveLength(0);
   }, TEST_TIMEOUT);
 
   test('regularizar pendencia fecha Pendencia, grava LogExecucao e ajusta o resumo da empresa', async () => {
