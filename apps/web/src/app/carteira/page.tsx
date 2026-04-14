@@ -27,65 +27,16 @@ import {
 } from '@/lib/constants';
 import { formatCnpj, formatDateTime } from '@/lib/formatters';
 import { VigenciaOperacionalResumo } from '@/components/status';
-
-type CarteiraFilterState = {
-  responsavelInternoId: string;
-  statusAcesso: StatusAcessoEmpresa | '';
-  statusProcuracao: StatusProcuracaoEmpresa | '';
-  pendenciaOperacional: '' | 'true' | 'false';
-};
-
-const initialFilters: CarteiraFilterState = {
-  responsavelInternoId: '',
-  statusAcesso: '',
-  statusProcuracao: '',
-  pendenciaOperacional: ''
-};
-
-function buildQueryFilters(filters: CarteiraFilterState) {
-  return {
-    responsavelInternoId: filters.responsavelInternoId.trim() || undefined,
-    pendenciaOperacional:
-      filters.pendenciaOperacional === ''
-        ? undefined
-        : filters.pendenciaOperacional === 'true',
-    statusAcesso: filters.statusAcesso || undefined,
-    statusProcuracao: filters.statusProcuracao || undefined
-  };
-}
-
-function matchesCarteiraFilters(
-  company: CompanyListItem,
-  filters: CarteiraFilterState
-) {
-  if (
-    filters.responsavelInternoId &&
-    company.responsavelInternoId !== filters.responsavelInternoId
-  ) {
-    return false;
-  }
-
-  if (filters.statusAcesso && company.statusAcesso !== filters.statusAcesso) {
-    return false;
-  }
-
-  if (
-    filters.statusProcuracao &&
-    company.statusProcuracao !== filters.statusProcuracao
-  ) {
-    return false;
-  }
-
-  if (filters.pendenciaOperacional !== '') {
-    const expectedPending = filters.pendenciaOperacional === 'true';
-
-    if (company.pendenciaOperacional !== expectedPending) {
-      return false;
-    }
-  }
-
-  return true;
-}
+import {
+  CERTIFICADO_VIGENCIA_OPTIONS,
+  buildQueryFilters,
+  filterCarteiraItems,
+  initialFilters,
+  matchesCarteiraFilters,
+  type CarteiraFilterState,
+  type CarteiraVigenciaFilterValue,
+  PROCURACAO_VIGENCIA_OPTIONS
+} from './carteira-filters';
 
 function upsertCarteiraItem(
   current: CompanyListItem[],
@@ -153,7 +104,7 @@ export default function CarteiraPage() {
           return;
         }
 
-        setCarteira(carteiraItems);
+        setCarteira(filterCarteiraItems(carteiraItems, initialFilters));
         setResponsaveis(responsaveisItems);
       } catch (loadError) {
         if (
@@ -208,7 +159,7 @@ export default function CarteiraPage() {
 
     try {
       const items = await listCarteira(buildQueryFilters(nextFilters));
-      setCarteira(items);
+      setCarteira(filterCarteiraItems(items, nextFilters));
     } catch (loadError) {
       if (loadError instanceof Error && loadError.message === 'Nao autenticado.') {
         router.replace('/login');
@@ -385,7 +336,8 @@ export default function CarteiraPage() {
                   Empresas na carteira
                 </h2>
                 <p className="text-sm text-slate-600">
-                  Filtre por responsavel, status manual, conferencias e pendencia.
+                  Filtre por responsavel, status manual, vigencias, conferencias
+                  e pendencia.
                 </p>
               </div>
             <p className="text-sm text-slate-500">
@@ -394,7 +346,10 @@ export default function CarteiraPage() {
           </div>
 
           <form className="mb-5" onSubmit={handleFilterSubmit}>
-            <fieldset className="grid gap-4 md:grid-cols-4" disabled={isFiltering}>
+            <fieldset
+              className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+              disabled={isFiltering}
+            >
               <label className="space-y-2">
                 <span className="block text-sm font-medium text-slate-700">
                   Responsavel interno
@@ -440,6 +395,54 @@ export default function CarteiraPage() {
                   <option value="">Todas</option>
                   <option value="true">Somente pendentes</option>
                   <option value="false">Somente regularizadas</option>
+                </select>
+              </label>
+
+              <label className="space-y-2">
+                <span className="block text-sm font-medium text-slate-700">
+                  Vigencia certificado
+                </span>
+                <select
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                  name="certificadoDigitalVigencia"
+                  value={filters.certificadoDigitalVigencia}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      certificadoDigitalVigencia: event.target.value as
+                        CarteiraVigenciaFilterValue
+                    }))
+                  }
+                >
+                  {CERTIFICADO_VIGENCIA_OPTIONS.map((option) => (
+                    <option key={option.value || 'todos'} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="space-y-2">
+                <span className="block text-sm font-medium text-slate-700">
+                  Vigencia procuracao
+                </span>
+                <select
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                  name="procuracaoVigencia"
+                  value={filters.procuracaoVigencia}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      procuracaoVigencia: event.target.value as
+                        CarteiraVigenciaFilterValue
+                    }))
+                  }
+                >
+                  {PROCURACAO_VIGENCIA_OPTIONS.map((option) => (
+                    <option key={option.value || 'todos'} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </label>
 
