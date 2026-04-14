@@ -50,6 +50,7 @@ export type SortDirection = 'ASC' | 'DESC';
 
 export type TipoLogExecucao =
   | 'CONFERENCIA_OPERACIONAL'
+  | 'EDICAO_MANUAL_EMPRESA'
   | 'REGISTRO_PENDENCIA'
   | 'REGULARIZACAO_PENDENCIA'
   | 'RETIRADA_CARTEIRA';

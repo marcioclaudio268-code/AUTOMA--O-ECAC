@@ -59,6 +59,7 @@ let prisma: PrismaClient;
 let app: INestApplication | undefined;
 let baseUrl = '';
 let sessionCookie = '';
+let adminUserId = '';
 let tempRoot = '';
 let postgresPort = 0;
 let seededData: SeededCompanyTraceabilityData;
@@ -108,6 +109,7 @@ beforeAll(async () => {
 
   prisma = new PrismaClient();
   seededData = await seedCompanyTraceabilityData(prisma);
+  adminUserId = await loadAdminUserId(prisma);
 
   app = await NestFactory.create(IntegrationTestModule, {
     logger: ['error']
@@ -411,7 +413,7 @@ describe('rastreabilidade operacional da empresa', () => {
     });
   }, TEST_TIMEOUT);
 
-  test('edicao manual da empresa continua funcional no detalhe operacional', async () => {
+  test('edicao manual da empresa registra LogExecucao legivel e atualiza o dossie operacional', async () => {
     const empresa = await prisma.empresa.create({
       data: {
         cnpj: '66666666000116',
@@ -477,6 +479,169 @@ describe('rastreabilidade operacional da empresa', () => {
     expect(
       persisted?.ultimaConferenciaOperacionalEm?.toISOString()
     ).toBe('2026-04-13T11:00:00.000Z');
+
+    const logs = await prisma.logExecucao.findMany({
+      include: {
+        executadoPorUsuarioInterno: {
+          select: {
+            nome: true
+          }
+        }
+      },
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        empresaId: empresa.id
+      }
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      empresaId: empresa.id,
+      executadoPorUsuarioInternoId: adminUserId,
+      resultado: ResultadoLogExecucao.SUCESSO,
+      resumo: 'Edicao manual da empresa registrada.',
+      tipo: TipoLogExecucao.EDICAO_MANUAL_EMPRESA
+    });
+    expect(logs[0]?.executadoPorUsuarioInterno?.nome).toBe('Admin ECAC');
+    expect(logs[0]?.detalhes).toContain(
+      'Status de acesso alterado de NAO_VERIFICADO para BLOQUEADO.'
+    );
+    expect(logs[0]?.detalhes).toContain(
+      'Status de procuracao alterado de NAO_VERIFICADA para PENDENTE.'
+    );
+    expect(logs[0]?.detalhes).toContain(
+      'Pendencia operacional alterada de nao para sim.'
+    );
+    expect(logs[0]?.detalhes).toContain(
+      'Observacoes operacionais atualizadas.'
+    );
+
+    const historyResponse = await requestJson(
+      `/companies/${empresa.id}/operational-history`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(historyResponse.response.status).toBe(200);
+    expect(historyResponse.body).toMatchObject({
+      empresaId: empresa.id,
+      ultimoLog: {
+        executadoPorUsuarioInternoId: adminUserId,
+        tipo: TipoLogExecucao.EDICAO_MANUAL_EMPRESA
+      }
+    });
+    expect(
+      (historyResponse.body as { logs: Array<{ tipo: string }> }).logs[0]?.tipo
+    ).toBe(TipoLogExecucao.EDICAO_MANUAL_EMPRESA);
+
+    const noChangeResponse = await requestJson(`/companies/${empresa.id}`, {
+      body: {
+        nomeFantasia: 'Empresa Edicao Manual Revisada',
+        observacoesOperacionais:
+          'Cliente avisado. Aguardando regularizacao do acesso.',
+        pendenciaOperacional: true,
+        statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
+        statusProcuracao: StatusProcuracaoEmpresa.PENDENTE,
+        ultimaConferenciaOperacionalEm: '2026-04-13T11:00:00.000Z'
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    expect(noChangeResponse.response.status).toBe(200);
+
+    const logsAfterNoChange = await prisma.logExecucao.findMany({
+      where: {
+        empresaId: empresa.id
+      }
+    });
+
+    expect(logsAfterNoChange).toHaveLength(1);
+  }, TEST_TIMEOUT);
+
+  test('edicao manual de empresa importada sem responsavel interno gera trilha legivel', async () => {
+    const empresa = await prisma.empresa.create({
+      data: {
+        cnpj: '77777777000106',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Importada Sem Responsavel',
+        pendenciaOperacional: false,
+        razaoSocial: 'Empresa Importada Sem Responsavel Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: null,
+        statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
+        statusProcuracao: StatusProcuracaoEmpresa.NAO_VERIFICADA
+      }
+    });
+
+    const response = await requestJson(`/companies/${empresa.id}`, {
+      body: {
+        observacoesOperacionais: 'Carteira importada sem responsavel interno.',
+        responsavelInternoId: seededData.responsavelId,
+        statusAcesso: StatusAcessoEmpresa.DISPONIVEL,
+        statusProcuracao: StatusProcuracaoEmpresa.VALIDA
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    expect(response.response.status).toBe(200);
+
+    const logs = await prisma.logExecucao.findMany({
+      include: {
+        executadoPorUsuarioInterno: {
+          select: {
+            nome: true
+          }
+        }
+      },
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        empresaId: empresa.id
+      }
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      empresaId: empresa.id,
+      executadoPorUsuarioInternoId: adminUserId,
+      resultado: ResultadoLogExecucao.SUCESSO,
+      tipo: TipoLogExecucao.EDICAO_MANUAL_EMPRESA
+    });
+    expect(logs[0]?.executadoPorUsuarioInterno?.nome).toBe('Admin ECAC');
+    expect(logs[0]?.detalhes).toContain(
+      'Responsavel interno alterado de Sem responsavel para Responsavel Traceabilidade.'
+    );
+    expect(logs[0]?.detalhes).toContain(
+      'Status de acesso alterado de NAO_VERIFICADO para DISPONIVEL.'
+    );
+    expect(logs[0]?.detalhes).toContain(
+      'Status de procuracao alterado de NAO_VERIFICADA para VALIDA.'
+    );
+    expect(logs[0]?.detalhes).toContain(
+      'Observacoes operacionais atualizadas.'
+    );
+
+    const historyResponse = await requestJson(
+      `/companies/${empresa.id}/operational-history`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(historyResponse.response.status).toBe(200);
+    expect(historyResponse.body).toMatchObject({
+      empresaId: empresa.id,
+      ultimoLog: {
+        executadoPorUsuarioInternoId: adminUserId,
+        tipo: TipoLogExecucao.EDICAO_MANUAL_EMPRESA
+      }
+    });
   }, TEST_TIMEOUT);
 
   test('conferir agora grava LogExecucao e atualiza ultimaConferenciaOperacionalEm', async () => {
@@ -743,6 +908,19 @@ async function seedCompanyTraceabilityData(
     empresaRemoveId: empresaRemove.id,
     pendenciaRegularizeId: pendenciaRegularize.id
   };
+}
+
+async function loadAdminUserId(database: PrismaClient): Promise<string> {
+  const admin = await database.usuarioInterno.findUniqueOrThrow({
+    select: {
+      id: true
+    },
+    where: {
+      email: ADMIN_EMAIL
+    }
+  });
+
+  return admin.id;
 }
 
 async function loginAndGetCookie(): Promise<string> {

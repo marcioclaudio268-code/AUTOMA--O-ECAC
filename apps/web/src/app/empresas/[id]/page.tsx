@@ -252,6 +252,8 @@ function formatLogTypeLabel(value: LogExecucaoRecord['tipo']) {
   switch (value) {
     case 'CONFERENCIA_OPERACIONAL':
       return 'Conferencia operacional';
+    case 'EDICAO_MANUAL_EMPRESA':
+      return 'Edicao manual da empresa';
     case 'REGISTRO_PENDENCIA':
       return 'Registro de pendencia';
     case 'REGULARIZACAO_PENDENCIA':
