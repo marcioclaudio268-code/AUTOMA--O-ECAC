@@ -26,6 +26,7 @@ import {
   STATUS_PROCURACAO_OPTIONS
 } from '@/lib/constants';
 import { formatCnpj, formatDateTime } from '@/lib/formatters';
+import { VigenciaOperacionalResumo } from '@/components/status';
 
 type CarteiraFilterState = {
   responsavelInternoId: string;
@@ -546,6 +547,7 @@ export default function CarteiraPage() {
                     <th className="px-3 py-3 font-medium">Responsavel</th>
                     <th className="px-3 py-3 font-medium">Acesso</th>
                     <th className="px-3 py-3 font-medium">Procuracao</th>
+                    <th className="px-3 py-3 font-medium">Vigências</th>
                     <th className="px-3 py-3 font-medium">Conferencias</th>
                     <th className="px-3 py-3 font-medium">Pendencia</th>
                     <th className="px-3 py-3 font-medium">Regularizacao</th>
@@ -577,6 +579,14 @@ export default function CarteiraPage() {
                       </td>
                       <td className="px-3 py-4 text-slate-700">
                         {STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
+                      </td>
+                      <td className="px-3 py-4 text-slate-700">
+                        <VigenciaOperacionalResumo
+                          certificadoDigitalValidoAte={
+                            company.certificadoDigitalValidoAte
+                          }
+                          procuracaoValidaAte={company.procuracaoValidaAte}
+                        />
                       </td>
                       <td className="px-3 py-4 text-slate-700">
                         <div className="space-y-2">

@@ -8,6 +8,7 @@ import { requireSession, signOut } from '@/lib/auth';
 import { listCompanies, type CompanyListItem } from '@/lib/api';
 import { STATUS_ACESSO_LABELS, STATUS_PROCURACAO_LABELS } from '@/lib/constants';
 import { formatCnpj } from '@/lib/formatters';
+import { VigenciaOperacionalResumo } from '@/components/status';
 
 export default function EmpresasPage() {
   const router = useRouter();
@@ -181,6 +182,7 @@ export default function EmpresasPage() {
                     <th className="px-3 py-3 font-medium">
                       Status de procuracao
                     </th>
+                    <th className="px-3 py-3 font-medium">Vigências</th>
                     <th className="px-3 py-3 font-medium">Carteira</th>
                     <th className="px-3 py-3 font-medium">Acoes</th>
                   </tr>
@@ -207,6 +209,14 @@ export default function EmpresasPage() {
                       </td>
                       <td className="px-3 py-4 text-slate-700">
                         {STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
+                      </td>
+                      <td className="px-3 py-4 text-slate-700">
+                        <VigenciaOperacionalResumo
+                          certificadoDigitalValidoAte={
+                            company.certificadoDigitalValidoAte
+                          }
+                          procuracaoValidaAte={company.procuracaoValidaAte}
+                        />
                       </td>
                       <td className="px-3 py-4 text-slate-700">
                         {company.naCarteira ? 'Na carteira' : 'Fora da carteira'}
