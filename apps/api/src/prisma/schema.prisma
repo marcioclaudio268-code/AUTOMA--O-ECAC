@@ -40,6 +40,27 @@ enum StatusIntegracao {
   NAO_CONFIGURADA
 }
 
+enum StatusIntegracaoAcessorias {
+  NAO_CONFIGURADA
+  CONFIGURADA
+  ATIVA
+  ERRO
+}
+
+enum TipoAcessoriasSyncJob {
+  TESTE_CONEXAO
+}
+
+enum StatusAcessoriasSyncJob {
+  INICIADO
+  SUCESSO
+  FALHA
+}
+
+enum TipoAcessoriasSyncCursor {
+  GERAL
+}
+
 enum TipoVarredura {
   MANUAL
 }
@@ -300,4 +321,44 @@ model LogExecucao {
   @@index([resultado])
   @@index([executadoPorUsuarioInternoId])
   @@index([chaveIdempotencia])
+}
+
+model IntegracaoAcessoriasConfig {
+  id                     String                      @id
+  apiTokenCriptografado   String                      @db.Text
+  status                 StatusIntegracaoAcessorias  @default(NAO_CONFIGURADA)
+  ultimaSincronizacaoEm  DateTime?
+  ultimoErroEm           DateTime?
+  mensagemErroAtual      String?                     @db.Text
+  createdAt              DateTime                    @default(now())
+  updatedAt              DateTime                    @updatedAt
+}
+
+model AcessoriasSyncJob {
+  id            String                  @id @default(cuid())
+  tipoJob       TipoAcessoriasSyncJob
+  status        StatusAcessoriasSyncJob @default(INICIADO)
+  iniciadoEm    DateTime
+  finalizadoEm  DateTime?
+  processados   Int                     @default(0)
+  criados       Int                     @default(0)
+  atualizados   Int                     @default(0)
+  ignorados     Int                     @default(0)
+  falhas        Int                     @default(0)
+  detalhesErro  String?                 @db.Text
+  createdAt     DateTime                @default(now())
+
+  @@index([createdAt])
+}
+
+model AcessoriasSyncCursor {
+  id              String                       @id @default(cuid())
+  tipoCursor      TipoAcessoriasSyncCursor     @default(GERAL)
+  valorCursor     String?                      @db.Text
+  ultimaPagina    Int?
+  ultimaExecucaoEm DateTime?
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+
+  @@unique([tipoCursor])
 }

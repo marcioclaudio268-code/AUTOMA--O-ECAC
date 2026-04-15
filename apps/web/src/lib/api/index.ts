@@ -26,6 +26,16 @@ export type StatusIntegracao =
   | 'ERRO'
   | 'NAO_CONFIGURADA';
 
+export type StatusIntegracaoAcessorias =
+  | 'NAO_CONFIGURADA'
+  | 'CONFIGURADA'
+  | 'ATIVA'
+  | 'ERRO';
+
+export type TipoAcessoriasSyncJob = 'TESTE_CONEXAO';
+
+export type StatusAcessoriasSyncJob = 'INICIADO' | 'SUCESSO' | 'FALHA';
+
 export type TipoVarredura = 'MANUAL';
 
 export type StatusExecucaoVarredura = 'INICIADA' | 'CONCLUIDA' | 'FALHA';
@@ -323,6 +333,44 @@ export type CompanyIntegration = {
   updatedAt: string;
   ultimoErroEm: string | null;
   ultimoSucessoEm: string | null;
+};
+
+export type AcessoriasConfigRecord = {
+  apiTokenConfigurado: boolean;
+  apiTokenMascarado: string | null;
+  createdAt: string | null;
+  id: string;
+  mensagemErroAtual: string | null;
+  status: StatusIntegracaoAcessorias;
+  ultimaSincronizacaoEm: string | null;
+  ultimoErroEm: string | null;
+  updatedAt: string | null;
+};
+
+export type AcessoriasJobRecord = {
+  atualizados: number;
+  createdAt: string;
+  criados: number;
+  detalhesErro: string | null;
+  finalizadoEm: string | null;
+  falhas: number;
+  id: string;
+  iniciadoEm: string;
+  ignorados: number;
+  processados: number;
+  status: StatusAcessoriasSyncJob;
+  tipoJob: TipoAcessoriasSyncJob;
+};
+
+export type AcessoriasConfigInput = {
+  apiToken: string;
+};
+
+export type AcessoriasConnectionTestResponse = {
+  config: AcessoriasConfigRecord;
+  job: AcessoriasJobRecord;
+  message: string;
+  success: boolean;
 };
 
 export type CompanyDetailItem = CompanyBase & {
@@ -858,4 +906,51 @@ export async function updateResponsavel(
     body: payload,
     method: 'PATCH'
   });
+}
+
+export async function getAcessoriasConfig(): Promise<AcessoriasConfigRecord> {
+  return apiRequest<AcessoriasConfigRecord>('/integracoes/acessorias/config');
+}
+
+export async function createAcessoriasConfig(
+  payload: AcessoriasConfigInput
+): Promise<AcessoriasConfigRecord> {
+  return apiRequest<AcessoriasConfigRecord>('/integracoes/acessorias/config', {
+    body: payload,
+    method: 'POST'
+  });
+}
+
+export async function updateAcessoriasConfig(
+  payload: AcessoriasConfigInput
+): Promise<AcessoriasConfigRecord> {
+  return apiRequest<AcessoriasConfigRecord>('/integracoes/acessorias/config', {
+    body: payload,
+    method: 'PATCH'
+  });
+}
+
+export async function testAcessoriasConnection(): Promise<AcessoriasConnectionTestResponse> {
+  return apiRequest<AcessoriasConnectionTestResponse>(
+    '/integracoes/acessorias/test-connection',
+    {
+      method: 'POST'
+    }
+  );
+}
+
+export async function listAcessoriasJobs(filters: {
+  take?: number | undefined;
+} = {}): Promise<AcessoriasJobRecord[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'take', filters.take);
+
+  const query = params.toString();
+
+  return apiRequest<AcessoriasJobRecord[]>(
+    query
+      ? `/integracoes/acessorias/jobs?${query}`
+      : '/integracoes/acessorias/jobs'
+  );
 }

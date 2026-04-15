@@ -1,7 +1,10 @@
 import type {
+  StatusAcessoriasSyncJob,
   RegimeTributario,
   StatusAcessoEmpresa,
-  StatusProcuracaoEmpresa
+  StatusIntegracaoAcessorias,
+  StatusProcuracaoEmpresa,
+  TipoAcessoriasSyncJob
 } from '@/lib/api';
 
 type Option<T extends string> = {
@@ -46,3 +49,27 @@ export const STATUS_PROCURACAO_LABELS: Record<
   PENDENTE: 'Pendente',
   VALIDA: 'Valida'
 };
+
+export const STATUS_INTEGRACAO_ACESSORIAS_LABELS: Record<
+  StatusIntegracaoAcessorias,
+  string
+> = {
+  ATIVA: 'Ativa',
+  CONFIGURADA: 'Configurada',
+  ERRO: 'Erro',
+  NAO_CONFIGURADA: 'Nao configurada'
+};
+
+export const STATUS_JOB_ACESSORIAS_LABELS: Record<
+  StatusAcessoriasSyncJob,
+  string
+> = {
+  FALHA: 'Falha',
+  INICIADO: 'Iniciado',
+  SUCESSO: 'Sucesso'
+};
+
+export const TIPO_JOB_ACESSORIAS_LABELS: Record<TipoAcessoriasSyncJob, string> =
+  {
+    TESTE_CONEXAO: 'Teste de conexao'
+  };
