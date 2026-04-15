@@ -1,0 +1,926 @@
+import 'reflect-metadata';
+
+import { spawnSync } from 'node:child_process';
+import { rmSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import * as net from 'node:net';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+import type { INestApplication } from '@nestjs/common';
+import { Module, ValidationPipe } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { NestFactory } from '@nestjs/core';
+import {
+  PerfilUsuario,
+  PrismaClient,
+  PrioridadePendencia,
+  ResultadoLogExecucao,
+  RegimeTributario,
+  StatusAcessoEmpresa,
+  StatusPendencia,
+  StatusProcuracaoEmpresa,
+  TipoLogExecucao,
+  TipoPendencia
+} from '@prisma/client';
+import EmbeddedPostgres from 'embedded-postgres';
+import * as bcrypt from 'bcrypt';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+
+const TEST_TIMEOUT = 120_000;
+const ADMIN_EMAIL = 'admin@ecac.local';
+const ADMIN_PASSWORD = 'admin123';
+const JWT_SECRET = 'pendencias-filter-integration-secret';
+const TEST_DATABASE_NAME = 'ecac_automacao_pendencias_filter_integration';
+const API_ROOT = process.cwd();
+const requireFromApi = createRequire(path.join(API_ROOT, 'package.json'));
+
+process.env.JWT_SECRET = JWT_SECRET;
+
+type RequestOptions = {
+  body?: unknown;
+  cookie?: string;
+  method?: 'GET' | 'POST' | 'PATCH';
+};
+
+type SeededPendenciasData = {
+  empresaAbertaId: string;
+  empresaForaCarteiraId: string;
+  empresaResolvidaId: string;
+  pendenciaAbertaAcessoId: string;
+  pendenciaAbertaOperacionalId: string;
+  pendenciaResolvidaProcuracaoId: string;
+  responsavelAId: string;
+  responsavelBId: string;
+};
+
+let postgres: EmbeddedPostgres;
+let prisma: PrismaClient;
+let app: INestApplication | undefined;
+let baseUrl = '';
+let sessionCookie = '';
+let tempRoot = '';
+let postgresPort = 0;
+let seededData: SeededPendenciasData;
+let scenarioSequence = 0;
+
+beforeAll(async () => {
+  tempRoot = await mkdtemp(
+    path.join(os.tmpdir(), 'ecac-automacao-pendencias-filter-it-')
+  );
+  const databaseDir = path.join(tempRoot, 'postgres');
+  postgresPort = await getFreePort();
+
+  postgres = new EmbeddedPostgres({
+    databaseDir,
+    password: 'password',
+    persistent: true,
+    port: postgresPort,
+    user: 'postgres'
+  });
+
+  await postgres.initialise();
+  await postgres.start();
+  await postgres.createDatabase(TEST_DATABASE_NAME);
+
+  process.env.DATABASE_URL = `postgresql://postgres:password@127.0.0.1:${postgresPort}/${TEST_DATABASE_NAME}?schema=public`;
+  process.env.DIRECT_URL = process.env.DATABASE_URL;
+  process.env.JWT_SECRET = JWT_SECRET;
+
+  runPrismaMigrateDeploy();
+  runBackendBuild();
+
+  const [authModule, pendenciasModule] = (await Promise.all([
+    importModuleFromDist('modules/auth/auth.module.js'),
+    importModuleFromDist('modules/pendencias/pendencias.module.js')
+  ])) as [AnyModuleNamespace, AnyModuleNamespace];
+
+  const IntegrationTestModule = class IntegrationTestModule {};
+  Module({
+    imports: [
+      ConfigModule.forRoot({
+        ignoreEnvFile: true,
+        isGlobal: true
+      }),
+      authModule.AuthModule,
+      pendenciasModule.PendenciasModule
+    ]
+  })(IntegrationTestModule);
+
+  prisma = new PrismaClient();
+  seededData = await seedPendenciasData(prisma);
+
+  app = await NestFactory.create(IntegrationTestModule, {
+    logger: ['error']
+  });
+  app.useGlobalPipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true
+    })
+  );
+
+  await app.listen(0, '127.0.0.1');
+  baseUrl = await app.getUrl();
+  sessionCookie = await loginAndGetCookie();
+}, TEST_TIMEOUT);
+
+afterAll(async () => {
+  if (app) {
+    await app.close();
+  }
+
+  if (prisma) {
+    await prisma.$disconnect();
+  }
+
+  if (postgres) {
+    await postgres.stop();
+  }
+
+  if (tempRoot) {
+    await removeDirectoryWithRetry(tempRoot);
+  }
+}, TEST_TIMEOUT);
+
+describe('filtros da fila de pendencias persistida', () => {
+  test('GET /pendencias ignora empresas fora da carteira e lista itens persistidos', async () => {
+    const response = await requestJson('/pendencias', {
+      cookie: sessionCookie
+    });
+
+    expect(response.response.status).toBe(200);
+    expect(Array.isArray(response.body)).toBe(true);
+
+    const items = response.body as Array<{
+      empresaId: string;
+      empresaNome: string;
+      linkTratamento: string;
+      prioridade: PrioridadePendencia;
+      responsavelInternoId: string | null;
+      status: StatusPendencia;
+      tipoPendencia: TipoPendencia;
+    }>;
+
+    expect(items).toHaveLength(3);
+    expect(
+      items.some((item) => item.empresaId === seededData.empresaForaCarteiraId)
+    ).toBe(false);
+    expect(
+      items.every((item) => item.linkTratamento === `/empresas/${item.empresaId}`)
+    ).toBe(true);
+    expect(items.map((item) => item.tipoPendencia)).toEqual(
+      expect.arrayContaining([
+        TipoPendencia.ACESSO,
+        TipoPendencia.OPERACIONAL,
+        TipoPendencia.PROCURACAO
+      ])
+    );
+  }, TEST_TIMEOUT);
+
+  test('filtra por status, prioridade, tipo e responsavel', async () => {
+    const statusResponse = await requestJson('/pendencias?status=ABERTA', {
+      cookie: sessionCookie
+    });
+
+    expect(statusResponse.response.status).toBe(200);
+    expect(statusResponse.body).toHaveLength(2);
+    expect(
+      (statusResponse.body as Array<{ status: StatusPendencia }>).every(
+        (item) => item.status === StatusPendencia.ABERTA
+      )
+    ).toBe(true);
+
+    const prioridadeResponse = await requestJson(
+      '/pendencias?prioridade=ALTA',
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(prioridadeResponse.response.status).toBe(200);
+    expect(prioridadeResponse.body).toHaveLength(1);
+    expect(
+      (prioridadeResponse.body as Array<{ tipoPendencia: TipoPendencia }>)[0]
+        ?.tipoPendencia
+    ).toBe(TipoPendencia.OPERACIONAL);
+
+    const tipoResponse = await requestJson('/pendencias?tipoPendencia=PROCURACAO', {
+      cookie: sessionCookie
+    });
+
+    expect(tipoResponse.response.status).toBe(200);
+    expect(tipoResponse.body).toHaveLength(1);
+    expect(
+      (tipoResponse.body as Array<{ status: StatusPendencia }>)[0]?.status
+    ).toBe(StatusPendencia.RESOLVIDA);
+
+    const responsavelResponse = await requestJson(
+      `/pendencias?responsavelInternoId=${seededData.responsavelAId}`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(responsavelResponse.response.status).toBe(200);
+    expect(responsavelResponse.body).toHaveLength(2);
+    expect(
+      (responsavelResponse.body as Array<{
+        responsavelInternoId: string | null;
+      }>).every(
+        (item) => item.responsavelInternoId === seededData.responsavelAId
+      )
+    ).toBe(true);
+  }, TEST_TIMEOUT);
+
+  test('ordena e pagina a fila global de forma estavel', async () => {
+    const oldest = await createPendenciaScenario(prisma, {
+      abertaEm: new Date('2026-04-13T08:00:00.000Z'),
+      descricao: 'Primeira pendencia da pagina.',
+      prioridade: PrioridadePendencia.BAIXA,
+      responsavelInternoId: seededData.responsavelBId,
+      tipo: TipoPendencia.ACESSO
+    });
+    const middle = await createPendenciaScenario(prisma, {
+      abertaEm: new Date('2026-04-13T09:00:00.000Z'),
+      descricao: 'Segunda pendencia da pagina.',
+      prioridade: PrioridadePendencia.ALTA,
+      responsavelInternoId: seededData.responsavelBId,
+      tipo: TipoPendencia.OPERACIONAL
+    });
+    const newest = await createPendenciaScenario(prisma, {
+      abertaEm: new Date('2026-04-13T10:00:00.000Z'),
+      descricao: 'Terceira pendencia da pagina.',
+      prioridade: PrioridadePendencia.MEDIA,
+      responsavelInternoId: seededData.responsavelBId,
+      tipo: TipoPendencia.PROCURACAO
+    });
+
+    const firstPageResponse = await requestJson(
+      `/pendencias?responsavelInternoId=${seededData.responsavelBId}&status=ABERTA&sortBy=ABERTA_EM&sortDirection=DESC&take=2&page=1`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(firstPageResponse.response.status).toBe(200);
+    expect(firstPageResponse.body).toHaveLength(2);
+    expect(
+      (firstPageResponse.body as Array<{ id: string }>).map((item) => item.id)
+    ).toEqual([newest.pendenciaId, middle.pendenciaId]);
+
+    const secondPageResponse = await requestJson(
+      `/pendencias?responsavelInternoId=${seededData.responsavelBId}&status=ABERTA&sortBy=ABERTA_EM&sortDirection=DESC&take=2&page=2`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(secondPageResponse.response.status).toBe(200);
+    expect(secondPageResponse.body).toHaveLength(1);
+    expect(
+      (secondPageResponse.body as Array<{ id: string }>)[0]?.id
+    ).toBe(oldest.pendenciaId);
+
+    const priorityOrderResponse = await requestJson(
+      `/pendencias?responsavelInternoId=${seededData.responsavelBId}&status=ABERTA&sortBy=PRIORIDADE&sortDirection=ASC&take=3&page=1`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(priorityOrderResponse.response.status).toBe(200);
+    expect(
+      (
+        priorityOrderResponse.body as Array<{
+          id: string;
+          prioridade: PrioridadePendencia;
+        }>
+      ).map((item) => ({
+        id: item.id,
+        prioridade: item.prioridade
+      }))
+    ).toEqual([
+      { id: middle.pendenciaId, prioridade: PrioridadePendencia.ALTA },
+      { id: newest.pendenciaId, prioridade: PrioridadePendencia.MEDIA },
+      { id: oldest.pendenciaId, prioridade: PrioridadePendencia.BAIXA }
+    ]);
+  }, TEST_TIMEOUT);
+});
+
+describe('tratamento operacional de pendencias persistidas', () => {
+  test('GET /pendencias/:id retorna o detalhe da pendencia persistida', async () => {
+    const response = await requestJson(
+      `/pendencias/${seededData.pendenciaAbertaOperacionalId}`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      empresaId: seededData.empresaAbertaId,
+      id: seededData.pendenciaAbertaOperacionalId,
+      status: StatusPendencia.ABERTA,
+      tipo: TipoPendencia.OPERACIONAL
+    });
+  }, TEST_TIMEOUT);
+
+  test('PATCH /pendencias/:id altera status, gera log e ajusta o resumo operacional da empresa', async () => {
+    const scenario = await createPendenciaScenario(prisma, {
+      descricao: 'Pendencia operacional para fechamento.',
+      prioridade: PrioridadePendencia.ALTA,
+      tipo: TipoPendencia.OPERACIONAL
+    });
+
+    const response = await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        status: StatusPendencia.RESOLVIDA
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      id: scenario.pendenciaId,
+      status: StatusPendencia.RESOLVIDA,
+      tipo: TipoPendencia.OPERACIONAL
+    });
+    expect(
+      (response.body as { fechadaEm: string | null }).fechadaEm
+    ).not.toBeNull();
+
+    const empresa = await prisma.empresa.findUniqueOrThrow({
+      select: {
+        pendenciaOperacional: true,
+        regularizadaEm: true
+      },
+      where: {
+        id: scenario.empresaId
+      }
+    });
+
+    expect(empresa.pendenciaOperacional).toBe(false);
+    expect(empresa.regularizadaEm).not.toBeNull();
+
+    const log = await prisma.logExecucao.findFirstOrThrow({
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        pendenciaId: scenario.pendenciaId,
+        tipo: TipoLogExecucao.REGULARIZACAO_PENDENCIA
+      }
+    });
+
+    expect(log.resultado).toBe(ResultadoLogExecucao.SUCESSO);
+    expect(log.resumo).toBe('Pendencia regularizada: Pendencia operacional de teste');
+  }, TEST_TIMEOUT);
+
+  test('PATCH /pendencias/:id reatribui o responsavel e grava log coerente', async () => {
+    const scenario = await createPendenciaScenario(prisma, {
+      descricao: 'Pendencia para reatribuicao.',
+      tipo: TipoPendencia.ACESSO
+    });
+
+    const response = await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        responsavelInternoId: seededData.responsavelBId
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      id: scenario.pendenciaId,
+      responsavelInternoId: seededData.responsavelBId
+    });
+
+    const log = await prisma.logExecucao.findFirstOrThrow({
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        pendenciaId: scenario.pendenciaId,
+        tipo: TipoLogExecucao.REGISTRO_PENDENCIA
+      }
+    });
+
+    expect(log.resultado).toBe(ResultadoLogExecucao.SUCESSO);
+    expect(log.resumo).toBe('Pendencia reatribuida: Pendencia de acesso de teste');
+    expect(log.detalhes).toContain(
+      'Responsavel alterado de Responsavel A para Responsavel B.'
+    );
+  }, TEST_TIMEOUT);
+
+  test('PATCH /pendencias/:id registra observacao operacional e grava log coerente', async () => {
+    const scenario = await createPendenciaScenario(prisma, {
+      descricao: 'Observacao inicial.',
+      tipo: TipoPendencia.OPERACIONAL
+    });
+
+    const response = await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        descricao: 'Observacao operacional atualizada na fila global.'
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      descricao: 'Observacao operacional atualizada na fila global.',
+      id: scenario.pendenciaId
+    });
+
+    const log = await prisma.logExecucao.findFirstOrThrow({
+      orderBy: {
+        executadoEm: 'desc'
+      },
+      where: {
+        pendenciaId: scenario.pendenciaId,
+        tipo: TipoLogExecucao.REGISTRO_PENDENCIA
+      }
+    });
+
+    expect(log.resultado).toBe(ResultadoLogExecucao.SUCESSO);
+    expect(log.resumo).toBe('Observacao registrada: Pendencia operacional de teste');
+    expect(log.detalhes).toContain('Observacao operacional atualizada.');
+  }, TEST_TIMEOUT);
+
+  test('GET /pendencias/:id/logs retorna o historico auditavel da pendencia', async () => {
+    const scenario = await createPendenciaScenario(prisma, {
+      descricao: 'Observacao inicial da timeline.',
+      tipo: TipoPendencia.OPERACIONAL
+    });
+
+    await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        descricao: 'Observacao operacional da timeline.'
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    await wait(25);
+
+    await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        responsavelInternoId: seededData.responsavelBId
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    await wait(25);
+
+    await requestJson(`/pendencias/${scenario.pendenciaId}`, {
+      body: {
+        status: StatusPendencia.RESOLVIDA
+      },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    const response = await requestJson(
+      `/pendencias/${scenario.pendenciaId}/logs?take=10`,
+      {
+        cookie: sessionCookie
+      }
+    );
+
+    expect(response.response.status).toBe(200);
+    expect(Array.isArray(response.body)).toBe(true);
+    expect(response.body).toHaveLength(3);
+
+    const logs = response.body as Array<{
+      pendenciaId: string | null;
+      resumo: string;
+      tipo: TipoLogExecucao;
+    }>;
+
+    expect(logs.every((log) => log.pendenciaId === scenario.pendenciaId)).toBe(
+      true
+    );
+    expect(logs.map((log) => log.resumo)).toEqual([
+      'Pendencia regularizada: Pendencia operacional de teste',
+      'Pendencia reatribuida: Pendencia operacional de teste',
+      'Observacao registrada: Pendencia operacional de teste'
+    ]);
+    expect(logs.map((log) => log.tipo)).toEqual([
+      TipoLogExecucao.REGULARIZACAO_PENDENCIA,
+      TipoLogExecucao.REGISTRO_PENDENCIA,
+      TipoLogExecucao.REGISTRO_PENDENCIA
+    ]);
+  }, TEST_TIMEOUT);
+});
+
+async function seedPendenciasData(
+  database: PrismaClient
+): Promise<SeededPendenciasData> {
+  const adminSenhaHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+
+  const admin = await database.usuarioInterno.create({
+    data: {
+      ativo: true,
+      email: ADMIN_EMAIL,
+      nome: 'Admin ECAC',
+      perfil: PerfilUsuario.ADMIN,
+      senhaHash: adminSenhaHash
+    }
+  });
+
+  const responsavelA = await database.responsavelInterno.create({
+    data: {
+      ativo: true,
+      email: 'responsavel.a@ecac.local',
+      nome: 'Responsavel A',
+      usuarioInternoId: admin.id
+    }
+  });
+
+  const responsavelB = await database.responsavelInterno.create({
+    data: {
+      ativo: true,
+      email: 'responsavel.b@ecac.local',
+      nome: 'Responsavel B',
+      usuarioInternoId: admin.id
+    }
+  });
+
+  const empresaAberta = await database.empresa.create({
+    data: {
+      cnpj: '11111111000191',
+      naCarteira: true,
+      nomeFantasia: 'Carteira Aberta',
+      pendenciaOperacional: true,
+      razaoSocial: 'Empresa Carteira Aberta Ltda',
+      regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+      responsavelInternoId: responsavelA.id,
+      statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
+      statusProcuracao: StatusProcuracaoEmpresa.VALIDA
+    }
+  });
+
+  const empresaResolvida = await database.empresa.create({
+    data: {
+      cnpj: '22222222000172',
+      naCarteira: true,
+      nomeFantasia: 'Carteira Resolvida',
+      pendenciaOperacional: false,
+      razaoSocial: 'Empresa Carteira Resolvida Ltda',
+      regimeTributario: RegimeTributario.LUCRO_PRESUMIDO,
+      responsavelInternoId: responsavelB.id,
+      statusAcesso: StatusAcessoEmpresa.DISPONIVEL,
+      statusProcuracao: StatusProcuracaoEmpresa.PENDENTE
+    }
+  });
+
+  const empresaForaCarteira = await database.empresa.create({
+    data: {
+      cnpj: '33333333000163',
+      naCarteira: false,
+      nomeFantasia: 'Fora da Carteira',
+      pendenciaOperacional: true,
+      razaoSocial: 'Empresa Fora da Carteira Ltda',
+      regimeTributario: RegimeTributario.LUCRO_REAL,
+      responsavelInternoId: responsavelA.id,
+      statusAcesso: StatusAcessoEmpresa.BLOQUEADO,
+      statusProcuracao: StatusProcuracaoEmpresa.PENDENTE
+    }
+  });
+
+  const pendenciaAbertaOperacional = await database.pendencia.create({
+    data: {
+      abertaEm: new Date('2026-04-10T09:00:00.000Z'),
+      descricao: 'Pendencia operacional aberta.',
+      empresaId: empresaAberta.id,
+      origem: 'MANUAL',
+      prioridade: PrioridadePendencia.ALTA,
+      responsavelInternoId: responsavelA.id,
+      status: StatusPendencia.ABERTA,
+      tipo: TipoPendencia.OPERACIONAL,
+      titulo: 'Pendencia operacional aberta'
+    }
+  });
+
+  const pendenciaAbertaAcesso = await database.pendencia.create({
+    data: {
+      abertaEm: new Date('2026-04-11T09:00:00.000Z'),
+      descricao: 'Pendencia de acesso aberta.',
+      empresaId: empresaAberta.id,
+      origem: 'MANUAL',
+      prioridade: PrioridadePendencia.MEDIA,
+      responsavelInternoId: responsavelA.id,
+      status: StatusPendencia.ABERTA,
+      tipo: TipoPendencia.ACESSO,
+      titulo: 'Pendencia de acesso aberta'
+    }
+  });
+
+  const pendenciaResolvidaProcuracao = await database.pendencia.create({
+    data: {
+      abertaEm: new Date('2026-04-08T09:00:00.000Z'),
+      descricao: 'Pendencia de procuracao resolvida.',
+      empresaId: empresaResolvida.id,
+      fechadaEm: new Date('2026-04-12T09:00:00.000Z'),
+      origem: 'MANUAL',
+      prioridade: PrioridadePendencia.BAIXA,
+      responsavelInternoId: responsavelB.id,
+      status: StatusPendencia.RESOLVIDA,
+      tipo: TipoPendencia.PROCURACAO,
+      titulo: 'Pendencia de procuracao resolvida'
+    }
+  });
+
+  await database.pendencia.create({
+    data: {
+      abertaEm: new Date('2026-04-12T11:00:00.000Z'),
+      descricao: 'Pendencia fora da carteira.',
+      empresaId: empresaForaCarteira.id,
+      origem: 'MANUAL',
+      prioridade: PrioridadePendencia.ALTA,
+      responsavelInternoId: responsavelA.id,
+      status: StatusPendencia.ABERTA,
+      tipo: TipoPendencia.OPERACIONAL,
+      titulo: 'Pendencia fora da carteira'
+    }
+  });
+
+  return {
+    empresaAbertaId: empresaAberta.id,
+    empresaForaCarteiraId: empresaForaCarteira.id,
+    empresaResolvidaId: empresaResolvida.id,
+    pendenciaAbertaAcessoId: pendenciaAbertaAcesso.id,
+    pendenciaAbertaOperacionalId: pendenciaAbertaOperacional.id,
+    pendenciaResolvidaProcuracaoId: pendenciaResolvidaProcuracao.id,
+    responsavelAId: responsavelA.id,
+    responsavelBId: responsavelB.id
+  };
+}
+
+async function createPendenciaScenario(
+  database: PrismaClient,
+  input: {
+    abertaEm?: Date;
+    descricao: string;
+    prioridade?: PrioridadePendencia;
+    responsavelInternoId?: string;
+    tipo: TipoPendencia;
+  }
+): Promise<{ empresaId: string; pendenciaId: string }> {
+  scenarioSequence += 1;
+  const companyIndex = String(scenarioSequence).padStart(6, '0');
+  const company = await database.empresa.create({
+    data: {
+      cnpj: `90000000${companyIndex}`,
+      naCarteira: true,
+      nomeFantasia: `Pendencia ${companyIndex}`,
+      pendenciaOperacional: input.tipo === TipoPendencia.OPERACIONAL,
+      razaoSocial: `Empresa Pendencia ${companyIndex} Ltda`,
+      regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+      responsavelInternoId:
+        input.responsavelInternoId ?? seededData.responsavelAId,
+      statusAcesso: StatusAcessoEmpresa.DISPONIVEL,
+      statusProcuracao: StatusProcuracaoEmpresa.VALIDA
+    }
+  });
+
+  const pendencia = await database.pendencia.create({
+    data: {
+      abertaEm: input.abertaEm ?? new Date('2026-04-13T10:00:00.000Z'),
+      descricao: input.descricao,
+      empresaId: company.id,
+      origem: 'MANUAL',
+      prioridade: input.prioridade ?? PrioridadePendencia.MEDIA,
+      responsavelInternoId:
+        input.responsavelInternoId ?? seededData.responsavelAId,
+      status: StatusPendencia.ABERTA,
+      tipo: input.tipo,
+      titulo:
+        input.tipo === TipoPendencia.ACESSO
+          ? 'Pendencia de acesso de teste'
+          : input.tipo === TipoPendencia.PROCURACAO
+            ? 'Pendencia de procuracao de teste'
+            : 'Pendencia operacional de teste'
+    }
+  });
+
+  return {
+    empresaId: company.id,
+    pendenciaId: pendencia.id
+  };
+}
+
+async function loginAndGetCookie(): Promise<string> {
+  const response = await requestJson('/auth/login', {
+    body: {
+      email: ADMIN_EMAIL,
+      senha: ADMIN_PASSWORD
+    },
+    method: 'POST'
+  });
+
+  if (response.response.status !== 200) {
+    throw new Error(
+      `Login de teste falhou com status ${response.response.status}: ${JSON.stringify(response.body)}`
+    );
+  }
+
+  const setCookie = response.response.headers.get('set-cookie');
+  if (!setCookie) {
+    throw new Error('Auth login nao retornou cookie de sessao.');
+  }
+
+  return setCookie.split(';', 1)[0] ?? setCookie;
+}
+
+async function requestJson(pathname: string, options: RequestOptions = {}) {
+  const headers: Record<string, string> = {
+    accept: 'application/json'
+  };
+
+  if (options.cookie) {
+    headers.cookie = options.cookie;
+  }
+
+  if (options.body !== undefined) {
+    headers['content-type'] = 'application/json';
+  }
+
+  const response = await fetch(new URL(pathname, baseUrl), {
+    body:
+      options.body === undefined ? undefined : JSON.stringify(options.body),
+    headers,
+    method: options.method ?? 'GET'
+  });
+
+  const text = await response.text();
+  const body = text ? parseJson(text, pathname) : null;
+
+  return {
+    body,
+    response,
+    text
+  };
+}
+
+function parseJson(text: string, pathname: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(
+      `Nao foi possivel decodificar JSON em ${pathname}: ${text}. Erro original: ${String(error)}`
+    );
+  }
+}
+
+function runPrismaMigrateDeploy(): void {
+  const env = {
+    ...process.env,
+    DATABASE_URL: process.env.DATABASE_URL,
+    DIRECT_URL: process.env.DIRECT_URL
+  };
+
+  const prismaCli = path.join(
+    API_ROOT,
+    'node_modules',
+    'prisma',
+    'build',
+    'index.js'
+  );
+  const result = spawnSync(
+    process.execPath,
+    [prismaCli, 'migrate', 'deploy', '--schema', 'src/prisma/schema.prisma'],
+    {
+      cwd: API_ROOT,
+      encoding: 'utf8',
+      env
+    }
+  );
+
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      [
+        'Falha ao executar prisma migrate deploy.',
+        `status: ${String(result.status)}`,
+        `stdout: ${result.stdout ?? ''}`,
+        `stderr: ${result.stderr ?? ''}`,
+        result.error ? `error: ${String(result.error)}` : ''
+      ]
+        .filter(Boolean)
+        .join('\n')
+    );
+  }
+}
+
+function runBackendBuild(): void {
+  rmSync(path.join(API_ROOT, 'tsconfig.build.tsbuildinfo'), {
+    force: true
+  });
+
+  const tscCli = path.join(
+    API_ROOT,
+    'node_modules',
+    'typescript',
+    'lib',
+    'tsc.js'
+  );
+  const result = spawnSync(
+    process.execPath,
+    [tscCli, '-p', 'tsconfig.build.json'],
+    {
+      cwd: API_ROOT,
+      encoding: 'utf8',
+      env: process.env
+    }
+  );
+
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      [
+        'Falha ao executar tsc build.',
+        `status: ${String(result.status)}`,
+        `stdout: ${result.stdout ?? ''}`,
+        `stderr: ${result.stderr ?? ''}`,
+        result.error ? `error: ${String(result.error)}` : ''
+      ]
+        .filter(Boolean)
+        .join('\n')
+    );
+  }
+}
+
+type AnyModuleNamespace = Record<string, any>;
+
+async function importModuleFromDist(
+  relativePath: string
+): Promise<AnyModuleNamespace> {
+  const modulePath = path.join(API_ROOT, 'dist', relativePath);
+  return requireFromApi(modulePath) as AnyModuleNamespace;
+}
+
+async function getFreePort(): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const server = net.createServer();
+
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+
+      if (!address || typeof address === 'string') {
+        reject(new Error('Nao foi possivel obter uma porta livre.'));
+        return;
+      }
+
+      const port = address.port;
+
+      server.close((closeError) => {
+        if (closeError) {
+          reject(closeError);
+          return;
+        }
+
+        resolve(port);
+      });
+    });
+  });
+}
+
+async function removeDirectoryWithRetry(target: string): Promise<void> {
+  const attempts = 10;
+
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      await rm(target, { force: true, recursive: true });
+      return;
+    } catch (error) {
+      if (index === attempts - 1 || !isRetryableRemoveError(error)) {
+        throw error;
+      }
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 500);
+      });
+    }
+  }
+}
+
+function isRetryableRemoveError(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return false;
+  }
+
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'EBUSY' || code === 'EPERM' || code === 'ENOTEMPTY';
+}
+
+async function wait(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}

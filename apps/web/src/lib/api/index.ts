@@ -26,6 +26,58 @@ export type StatusIntegracao =
   | 'ERRO'
   | 'NAO_CONFIGURADA';
 
+export type StatusIntegracaoAcessorias =
+  | 'NAO_CONFIGURADA'
+  | 'CONFIGURADA'
+  | 'ATIVA'
+  | 'ERRO';
+
+export type TipoAcessoriasSyncJob = 'TESTE_CONEXAO';
+
+export type StatusAcessoriasSyncJob = 'INICIADO' | 'SUCESSO' | 'FALHA';
+
+export type TipoVarredura = 'MANUAL';
+
+export type StatusExecucaoVarredura = 'INICIADA' | 'CONCLUIDA' | 'FALHA';
+
+export type TipoEventoOperacional =
+  | 'VARREDURA_RELEVANTE'
+  | 'MUDANCA_ESTADO';
+
+export type TipoPendencia = 'ACESSO' | 'OPERACIONAL' | 'PROCURACAO';
+
+export type StatusPendencia = 'ABERTA' | 'RESOLVIDA';
+
+export type PrioridadePendencia = 'BAIXA' | 'MEDIA' | 'ALTA';
+
+export type PendenciaSortBy =
+  | 'PRIORIDADE'
+  | 'ABERTA_EM'
+  | 'ATUALIZADA_EM'
+  | 'STATUS';
+
+export type SortDirection = 'ASC' | 'DESC';
+
+export type TipoLogExecucao =
+  | 'CONFERENCIA_OPERACIONAL'
+  | 'EDICAO_MANUAL_EMPRESA'
+  | 'REGISTRO_PENDENCIA'
+  | 'REGULARIZACAO_PENDENCIA'
+  | 'REVISAO_OPERACIONAL'
+  | 'RETIRADA_CARTEIRA';
+
+export type ResultadoLogExecucao = 'FALHA' | 'SEM_ALTERACAO' | 'SUCESSO';
+
+export type StatusPendenciaOperacional = StatusPendencia;
+
+export type CriticidadePendenciaOperacional = PrioridadePendencia;
+
+export type PendenciaStatusAtual =
+  | StatusAcessoEmpresa
+  | StatusProcuracaoEmpresa
+  | StatusPendencia
+  | 'PENDENTE';
+
 export type AuthUser = {
   email: string;
   id: string;
@@ -45,6 +97,187 @@ export type ResponsavelInternoSummary = {
   usuarioInternoId: string;
 };
 
+export type DashboardResponsavelSummary = {
+  responsavelInternoId: string | null;
+  responsavelNome: string;
+  totalEmpresas: number;
+};
+
+export type DashboardSummaryResponse = {
+  totalEmpresasNaCarteira: number;
+  totalEmpresasComPendenciaOperacional: number;
+  totalEmpresasComAcessoPendenteOuBloqueado: number;
+  totalEmpresasComProcuracaoPendente: number;
+  distribuicaoPorResponsavel: DashboardResponsavelSummary[];
+};
+
+export type PendenciaRecord = {
+  abertaEm: string;
+  atualizadaPorUsuarioInternoId: string | null;
+  atualizadaPorUsuarioInternoNome: string | null;
+  criadaPorUsuarioInternoId: string | null;
+  criadaPorUsuarioInternoNome: string | null;
+  createdAt: string;
+  descricao: string;
+  empresaCnpj: string;
+  empresaId: string;
+  empresaNome: string;
+  empresaNomeFantasia: string | null;
+  fechadaEm: string | null;
+  id: string;
+  linkTratamento: string;
+  motivo: string;
+  observacaoOperacional: string | null;
+  origem: string | null;
+  prioridade: PrioridadePendencia;
+  criticidade: PrioridadePendencia;
+  responsavelInternoId: string | null;
+  responsavelInternoNome: string;
+  resolvedAt: string | null;
+  status: StatusPendencia;
+  statusAtual: PendenciaStatusAtual;
+  tipo: TipoPendencia;
+  tipoPendencia: TipoPendencia;
+  titulo: string;
+  ultimaConferenciaOperacionalEm: string | null;
+  updatedAt: string;
+};
+
+export type PendenciaListItem = PendenciaRecord;
+
+export type PendenciaListFilters = {
+  criticidade?: PrioridadePendencia | undefined;
+  empresaId?: string | undefined;
+  page?: number | undefined;
+  prioridade?: PrioridadePendencia | undefined;
+  responsavelInternoId?: string | undefined;
+  sortBy?: PendenciaSortBy | undefined;
+  sortDirection?: SortDirection | undefined;
+  status?: StatusPendencia | undefined;
+  take?: number | undefined;
+  tipoPendencia?: TipoPendencia | undefined;
+};
+
+export type VarreduraRecord = {
+  createdAt: string;
+  empresaId: string;
+  finalizadoEm: string | null;
+  id: string;
+  iniciadoEm: string;
+  resumoResultado: string | null;
+  statusExecucao: StatusExecucaoVarredura;
+  tipoVarredura: TipoVarredura;
+  updatedAt: string;
+};
+
+export type ManualScanExecutionResponse = {
+  varredura: VarreduraRecord;
+};
+
+export type RecentScansFilters = {
+  take?: number | undefined;
+};
+
+export type EventoOperacionalRecord = {
+  createdAt: string;
+  descricao: string;
+  empresaId: string;
+  id: string;
+  metadata: Record<string, unknown> | null;
+  tipoEvento: TipoEventoOperacional;
+  varreduraId: string;
+};
+
+export type RecentEventosFilters = {
+  take?: number | undefined;
+};
+
+export type LogExecucaoRecord = {
+  createdAt: string;
+  detalhes: string | null;
+  empresaId: string;
+  empresaNome: string;
+  executadoEm: string;
+  executadoPorUsuarioInternoId: string | null;
+  executadoPorUsuarioInternoNome: string;
+  id: string;
+  chaveIdempotencia: string | null;
+  pendenciaId: string | null;
+  pendenciaStatus: StatusPendencia | null;
+  pendenciaTipo: TipoPendencia | null;
+  pendenciaTitulo: string | null;
+  resultado: ResultadoLogExecucao;
+  resumo: string;
+  tipo: TipoLogExecucao;
+};
+
+export type CompanyOperationalSnapshot = {
+  cnpj: string;
+  empresaId: string;
+  empresaNome: string;
+  naCarteira: boolean;
+  nomeFantasia: string | null;
+  observacoesOperacionais: string | null;
+  pendenciaOperacional: boolean;
+  regularizadaEm: string | null;
+  responsavelInternoId: string | null;
+  responsavelInternoNome: string | null;
+  statusAcesso: StatusAcessoEmpresa;
+  statusProcuracao: StatusProcuracaoEmpresa;
+  ultimaConferenciaAcessoEm: string | null;
+  ultimaConferenciaOperacionalEm: string | null;
+  ultimaConferenciaProcuracaoEm: string | null;
+  ultimaVarreduraEm: string | null;
+  ultimoEventoRelevanteEm: string | null;
+  updatedAt: string;
+};
+
+export type CompanyOperationalHistory = {
+  empresa: CompanyOperationalSnapshot;
+  empresaId: string;
+  empresaNome: string;
+  logs: LogExecucaoRecord[];
+  pendencias: PendenciaRecord[];
+  pendenciasAbertas: PendenciaRecord[];
+  pendenciasEncerradasRecentes: PendenciaRecord[];
+  ultimoLog: LogExecucaoRecord | null;
+};
+
+export type PendenciaOperacionalRecord = PendenciaRecord;
+
+export type RecentPendenciasFilters = PendenciaListFilters;
+
+export type PendenciaCreateInput = {
+  chaveIdempotencia?: string | null | undefined;
+  descricao?: string | undefined;
+  origem?: string | undefined;
+  prioridade?: PrioridadePendencia | undefined;
+  responsavelInternoId?: string | null | undefined;
+  status?: StatusPendencia | undefined;
+  tipo?: TipoPendencia | undefined;
+  titulo?: string | undefined;
+};
+
+export type PendenciaUpdateInput = {
+  descricao?: string | undefined;
+  origem?: string | undefined;
+  prioridade?: PrioridadePendencia | undefined;
+  responsavelInternoId?: string | null | undefined;
+  status?: StatusPendencia | undefined;
+  titulo?: string | undefined;
+};
+
+export type CompanyOperationalActionInput = {
+  chaveIdempotencia?: string | null | undefined;
+  pendenciaId?: string | null | undefined;
+};
+
+export type CompanyOperationalMutationResponse = {
+  updatedAt: string;
+};
+
+export type CreateCompanyPendenciaInput = PendenciaCreateInput;
+
 export type ResponsavelInternoDetail = {
   ativo: boolean;
   email: string;
@@ -63,16 +296,22 @@ export type CompanyBase = {
   cnpj: string;
   createdAt: string;
   id: string;
+  certificadoDigitalImplementadoEm: string | null;
+  certificadoDigitalValidoAte: string | null;
   naCarteira: boolean;
   pendenciaOperacional: boolean;
   nomeFantasia: string | null;
   observacoesOperacionais: string | null;
+  procuracaoImplementadaEm: string | null;
+  procuracaoValidaAte: string | null;
   razaoSocial: string;
   regimeTributario: RegimeTributario;
   responsavelInternoId: string | null;
   statusAcesso: StatusAcessoEmpresa;
   statusProcuracao: StatusProcuracaoEmpresa;
+  ultimaConferenciaAcessoEm: string | null;
   ultimaConferenciaOperacionalEm: string | null;
+  ultimaConferenciaProcuracaoEm: string | null;
   regularizadaEm: string | null;
   ultimaVarreduraEm: string | null;
   ultimoEventoRelevanteEm: string | null;
@@ -96,6 +335,44 @@ export type CompanyIntegration = {
   ultimoSucessoEm: string | null;
 };
 
+export type AcessoriasConfigRecord = {
+  apiTokenConfigurado: boolean;
+  apiTokenMascarado: string | null;
+  createdAt: string | null;
+  id: string;
+  mensagemErroAtual: string | null;
+  status: StatusIntegracaoAcessorias;
+  ultimaSincronizacaoEm: string | null;
+  ultimoErroEm: string | null;
+  updatedAt: string | null;
+};
+
+export type AcessoriasJobRecord = {
+  atualizados: number;
+  createdAt: string;
+  criados: number;
+  detalhesErro: string | null;
+  finalizadoEm: string | null;
+  falhas: number;
+  id: string;
+  iniciadoEm: string;
+  ignorados: number;
+  processados: number;
+  status: StatusAcessoriasSyncJob;
+  tipoJob: TipoAcessoriasSyncJob;
+};
+
+export type AcessoriasConfigInput = {
+  apiToken: string;
+};
+
+export type AcessoriasConnectionTestResponse = {
+  config: AcessoriasConfigRecord;
+  job: AcessoriasJobRecord;
+  message: string;
+  success: boolean;
+};
+
 export type CompanyDetailItem = CompanyBase & {
   integracoes: CompanyIntegration[];
   responsavelInterno: ResponsavelInternoDetail | null;
@@ -103,17 +380,23 @@ export type CompanyDetailItem = CompanyBase & {
 
 export type CompanyCreateInput = {
   cnpj: string;
+  certificadoDigitalImplementadoEm?: string | null | undefined;
+  certificadoDigitalValidoAte?: string | null | undefined;
   naCarteira?: boolean | undefined;
   nomeFantasia?: string | undefined;
   observacoesOperacionais?: string | undefined;
+  procuracaoImplementadaEm?: string | null | undefined;
+  procuracaoValidaAte?: string | null | undefined;
   razaoSocial: string;
   regimeTributario: RegimeTributario;
   responsavelInternoId?: string | null | undefined;
   statusAcesso?: StatusAcessoEmpresa | undefined;
   statusProcuracao?: StatusProcuracaoEmpresa | undefined;
   pendenciaOperacional?: boolean | undefined;
+  ultimaConferenciaAcessoEm?: string | null | undefined;
   regularizadaEm?: string | null | undefined;
   ultimaConferenciaOperacionalEm?: string | null | undefined;
+  ultimaConferenciaProcuracaoEm?: string | null | undefined;
 };
 
 export type CompanyUpdateInput = Partial<CompanyCreateInput>;
@@ -176,7 +459,7 @@ function parseResponseBody(text: string): unknown {
 function appendQueryParam(
   params: URLSearchParams,
   key: string,
-  value: string | boolean | undefined
+  value: string | boolean | number | undefined
 ) {
   if (value === undefined) {
     return;
@@ -254,6 +537,38 @@ async function apiRequest<T>(
   return payload as T;
 }
 
+function normalizePendenciaRecord(record: PendenciaRecord): PendenciaRecord {
+  return {
+    ...record,
+    resolvedAt: record.resolvedAt ?? record.fechadaEm ?? null
+  };
+}
+
+function normalizePendenciaRecords(
+  records: PendenciaRecord[]
+): PendenciaRecord[] {
+  return records.map((record) => normalizePendenciaRecord(record));
+}
+
+function appendPendenciaFilters(
+  params: URLSearchParams,
+  filters: PendenciaListFilters
+) {
+  appendQueryParam(params, 'empresaId', filters.empresaId);
+  appendQueryParam(params, 'page', filters.page);
+  appendQueryParam(params, 'responsavelInternoId', filters.responsavelInternoId);
+  appendQueryParam(params, 'status', filters.status);
+  appendQueryParam(
+    params,
+    'prioridade',
+    filters.prioridade ?? filters.criticidade
+  );
+  appendQueryParam(params, 'sortBy', filters.sortBy);
+  appendQueryParam(params, 'sortDirection', filters.sortDirection);
+  appendQueryParam(params, 'tipoPendencia', filters.tipoPendencia);
+  appendQueryParam(params, 'take', filters.take);
+}
+
 export async function getCurrentUser(): Promise<AuthUser> {
   return apiRequest<AuthUser>('/auth/me');
 }
@@ -309,6 +624,238 @@ export async function listCarteira(
   });
 }
 
+export async function getDashboardSummary(): Promise<DashboardSummaryResponse> {
+  return apiRequest<DashboardSummaryResponse>('/dashboard/summary');
+}
+
+export async function listPendencias(
+  filters: PendenciaListFilters = {}
+): Promise<PendenciaListItem[]> {
+  const params = new URLSearchParams();
+
+  appendPendenciaFilters(params, filters);
+
+  const query = params.toString();
+
+  const pendencias = await apiRequest<PendenciaRecord[]>(
+    query ? `/pendencias?${query}` : '/pendencias'
+  );
+
+  return normalizePendenciaRecords(pendencias);
+}
+
+export async function executeManualScan(
+  companyId: string
+): Promise<ManualScanExecutionResponse> {
+  return apiRequest<ManualScanExecutionResponse>(
+    `/companies/${companyId}/scans/manual`,
+    {
+      method: 'POST'
+    }
+  );
+}
+
+export async function listVarreduras(
+  companyId: string,
+  filters: RecentScansFilters = {}
+): Promise<VarreduraRecord[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'take', filters.take);
+
+  const query = params.toString();
+
+  return apiRequest<VarreduraRecord[]>(
+    query ? `/companies/${companyId}/scans/recent?${query}` : `/companies/${companyId}/scans/recent`
+  );
+}
+
+export async function listEventosOperacionais(
+  companyId: string,
+  filters: RecentEventosFilters = {}
+): Promise<EventoOperacionalRecord[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'take', filters.take);
+
+  const query = params.toString();
+
+  return apiRequest<EventoOperacionalRecord[]>(
+    query
+      ? `/companies/${companyId}/events/recent?${query}`
+      : `/companies/${companyId}/events/recent`
+  );
+}
+
+export async function listCompanyPendencias(
+  companyId: string,
+  filters: RecentPendenciasFilters = {}
+): Promise<PendenciaOperacionalRecord[]> {
+  const params = new URLSearchParams();
+
+  appendPendenciaFilters(params, filters);
+
+  const query = params.toString();
+
+  const pendencias = await apiRequest<PendenciaRecord[]>(
+    query
+      ? `/companies/${companyId}/pendencias?${query}`
+      : `/companies/${companyId}/pendencias`
+  );
+
+  return normalizePendenciaRecords(pendencias);
+}
+
+export async function createCompanyPendencia(
+  companyId: string,
+  payload: CreateCompanyPendenciaInput = {}
+): Promise<PendenciaRecord> {
+  const pendencia = await apiRequest<PendenciaRecord>(
+    `/companies/${companyId}/pendencias`,
+    {
+      body: payload,
+      method: 'POST'
+    }
+  );
+
+  return normalizePendenciaRecord(pendencia);
+}
+
+export async function getPendencia(id: string): Promise<PendenciaRecord> {
+  const pendencia = await apiRequest<PendenciaRecord>(`/pendencias/${id}`);
+  return normalizePendenciaRecord(pendencia);
+}
+
+export async function updatePendencia(
+  id: string,
+  payload: PendenciaUpdateInput
+): Promise<PendenciaRecord> {
+  const pendencia = await apiRequest<PendenciaRecord>(`/pendencias/${id}`, {
+    body: payload,
+    method: 'PATCH'
+  });
+
+  return normalizePendenciaRecord(pendencia);
+}
+
+export async function listPendenciaLogs(
+  id: string,
+  filters: { take?: number | undefined } = {}
+): Promise<LogExecucaoRecord[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'take', filters.take);
+
+  const query = params.toString();
+
+  return apiRequest<LogExecucaoRecord[]>(
+    query ? `/pendencias/${id}/logs?${query}` : `/pendencias/${id}/logs`
+  );
+}
+
+export async function listCompanyLogs(
+  companyId: string,
+  filters: { take?: number | undefined } = {}
+): Promise<LogExecucaoRecord[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'take', filters.take);
+
+  const query = params.toString();
+
+  return apiRequest<LogExecucaoRecord[]>(
+    query ? `/companies/${companyId}/logs?${query}` : `/companies/${companyId}/logs`
+  );
+}
+
+export async function getCompanyOperationalHistory(
+  companyId: string,
+  filters: { take?: number | undefined } = {}
+): Promise<CompanyOperationalHistory> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'take', filters.take);
+
+  const query = params.toString();
+  const history = await apiRequest<CompanyOperationalHistory>(
+    query
+      ? `/companies/${companyId}/operational-history?${query}`
+      : `/companies/${companyId}/operational-history`
+  );
+
+  return {
+    ...history,
+    pendencias: normalizePendenciaRecords(history.pendencias),
+    pendenciasAbertas: normalizePendenciaRecords(history.pendenciasAbertas),
+    pendenciasEncerradasRecentes: normalizePendenciaRecords(
+      history.pendenciasEncerradasRecentes
+    )
+  };
+}
+
+export async function registerCompanyCheck(
+  companyId: string,
+  payload: CompanyOperationalActionInput = {}
+): Promise<CompanyOperationalMutationResponse> {
+  return apiRequest<CompanyOperationalMutationResponse>(
+    `/companies/${companyId}/operational/check`,
+    {
+      body: payload,
+      method: 'POST'
+    }
+  );
+}
+
+export async function registerCompanyOperationalReview(
+  companyId: string,
+  payload: CompanyOperationalActionInput = {}
+): Promise<CompanyOperationalMutationResponse> {
+  return apiRequest<CompanyOperationalMutationResponse>(
+    `/companies/${companyId}/operational/review`,
+    {
+      body: payload,
+      method: 'POST'
+    }
+  );
+}
+
+export async function regularizeCompanyOperationalIssue(
+  companyId: string,
+  payload: CompanyOperationalActionInput = {}
+): Promise<PendenciaRecord | null> {
+  const pendencia = await apiRequest<PendenciaRecord | null>(
+    `/companies/${companyId}/operational/regularize`,
+    {
+      body: payload,
+      method: 'POST'
+    }
+  );
+
+  return pendencia ? normalizePendenciaRecord(pendencia) : null;
+}
+
+export async function resolveCompanyPendencia(
+  companyId: string,
+  pendenciaId: string
+): Promise<PendenciaOperacionalRecord> {
+  return (await regularizeCompanyOperationalIssue(companyId, {
+    pendenciaId
+  })) as PendenciaOperacionalRecord;
+}
+
+export async function removeCompanyFromWallet(
+  companyId: string,
+  payload: CompanyOperationalActionInput = {}
+): Promise<CompanyOperationalMutationResponse> {
+  return apiRequest<CompanyOperationalMutationResponse>(
+    `/companies/${companyId}/operational/remove-from-wallet`,
+    {
+      body: payload,
+      method: 'POST'
+    }
+  );
+}
+
 export async function getCompany(id: string): Promise<CompanyDetailItem> {
   return apiRequest<CompanyDetailItem>(`/companies/${id}`);
 }
@@ -359,4 +906,51 @@ export async function updateResponsavel(
     body: payload,
     method: 'PATCH'
   });
+}
+
+export async function getAcessoriasConfig(): Promise<AcessoriasConfigRecord> {
+  return apiRequest<AcessoriasConfigRecord>('/integracoes/acessorias/config');
+}
+
+export async function createAcessoriasConfig(
+  payload: AcessoriasConfigInput
+): Promise<AcessoriasConfigRecord> {
+  return apiRequest<AcessoriasConfigRecord>('/integracoes/acessorias/config', {
+    body: payload,
+    method: 'POST'
+  });
+}
+
+export async function updateAcessoriasConfig(
+  payload: AcessoriasConfigInput
+): Promise<AcessoriasConfigRecord> {
+  return apiRequest<AcessoriasConfigRecord>('/integracoes/acessorias/config', {
+    body: payload,
+    method: 'PATCH'
+  });
+}
+
+export async function testAcessoriasConnection(): Promise<AcessoriasConnectionTestResponse> {
+  return apiRequest<AcessoriasConnectionTestResponse>(
+    '/integracoes/acessorias/test-connection',
+    {
+      method: 'POST'
+    }
+  );
+}
+
+export async function listAcessoriasJobs(filters: {
+  take?: number | undefined;
+} = {}): Promise<AcessoriasJobRecord[]> {
+  const params = new URLSearchParams();
+
+  appendQueryParam(params, 'take', filters.take);
+
+  const query = params.toString();
+
+  return apiRequest<AcessoriasJobRecord[]>(
+    query
+      ? `/integracoes/acessorias/jobs?${query}`
+      : '/integracoes/acessorias/jobs'
+  );
 }

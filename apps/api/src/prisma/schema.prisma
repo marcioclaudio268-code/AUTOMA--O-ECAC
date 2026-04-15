@@ -40,6 +40,91 @@ enum StatusIntegracao {
   NAO_CONFIGURADA
 }
 
+enum StatusIntegracaoAcessorias {
+  NAO_CONFIGURADA
+  CONFIGURADA
+  ATIVA
+  ERRO
+}
+
+enum TipoAcessoriasSyncJob {
+  TESTE_CONEXAO
+}
+
+enum StatusAcessoriasSyncJob {
+  INICIADO
+  SUCESSO
+  FALHA
+}
+
+enum TipoAcessoriasSyncCursor {
+  GERAL
+}
+
+enum TipoVarredura {
+  MANUAL
+}
+
+enum StatusExecucaoVarredura {
+  INICIADA
+  CONCLUIDA
+  FALHA
+}
+
+enum StatusPendenciaOperacional {
+  ABERTA
+  RESOLVIDA
+}
+
+enum CriticidadePendenciaOperacional {
+  BAIXA
+  MEDIA
+  ALTA
+}
+
+enum TipoEventoOperacional {
+  VARREDURA_RELEVANTE
+  MUDANCA_ESTADO
+}
+
+enum TipoPendenciaOperacional {
+  ACESSO
+  OPERACIONAL
+  PROCURACAO
+}
+
+enum TipoPendencia {
+  ACESSO
+  OPERACIONAL
+  PROCURACAO
+}
+
+enum StatusPendencia {
+  ABERTA
+  RESOLVIDA
+}
+
+enum PrioridadePendencia {
+  BAIXA
+  MEDIA
+  ALTA
+}
+
+enum TipoLogExecucao {
+  CONFERENCIA_OPERACIONAL
+  REVISAO_OPERACIONAL
+  REGISTRO_PENDENCIA
+  REGULARIZACAO_PENDENCIA
+  RETIRADA_CARTEIRA
+  EDICAO_MANUAL_EMPRESA
+}
+
+enum ResultadoLogExecucao {
+  SUCESSO
+  SEM_ALTERACAO
+  FALHA
+}
+
 enum RegimeTributario {
   SIMPLES_NACIONAL
   LUCRO_PRESUMIDO
@@ -57,6 +142,9 @@ model UsuarioInterno {
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
   responsaveis  ResponsavelInterno[]
+  pendenciasCriadas Pendencia[] @relation("PendenciaCriadaPor")
+  pendenciasAtualizadas Pendencia[] @relation("PendenciaAtualizadaPor")
+  logsExecucao  LogExecucao[]
 }
 
 model ResponsavelInterno {
@@ -69,6 +157,7 @@ model ResponsavelInterno {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   empresas        Empresa[]
+  pendencias      Pendencia[]
 
   @@index([usuarioInternoId])
 }
@@ -86,13 +175,24 @@ model Empresa {
   statusAcesso            StatusAcessoEmpresa   @default(NAO_VERIFICADO)
   statusProcuracao        StatusProcuracaoEmpresa @default(NAO_VERIFICADA)
   observacoesOperacionais String?               @db.Text
+  ultimaConferenciaAcessoEm DateTime?
   ultimaConferenciaOperacionalEm DateTime?
+  ultimaConferenciaProcuracaoEm DateTime?
+  certificadoDigitalImplementadoEm DateTime?
+  certificadoDigitalValidoAte DateTime?
+  procuracaoImplementadaEm DateTime?
+  procuracaoValidaAte DateTime?
   regularizadaEm          DateTime?
   ultimaVarreduraEm       DateTime?
   ultimoEventoRelevanteEm DateTime?
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
   integracoes             IntegracaoEmpresa[]
+  pendenciasOperacionais  PendenciaOperacional[]
+  pendencias              Pendencia[]
+  logsExecucao            LogExecucao[]
+  varreduras              Varredura[]
+  eventosOperacionais     EventoOperacional[]
 
   @@index([responsavelInternoId])
   @@index([naCarteira])
@@ -113,4 +213,152 @@ model IntegracaoEmpresa {
   updatedAt         DateTime        @updatedAt
 
   @@index([empresaId])
+}
+
+model Varredura {
+  id             String                   @id @default(cuid())
+  empresaId      String
+  empresa       Empresa                  @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  tipoVarredura  TipoVarredura
+  statusExecucao StatusExecucaoVarredura
+  iniciadoEm     DateTime
+  finalizadoEm   DateTime?
+  resumoResultado String?                 @db.Text
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  eventoOperacional EventoOperacional?
+
+  @@index([empresaId])
+  @@index([tipoVarredura])
+  @@index([statusExecucao])
+}
+
+model EventoOperacional {
+  id          String                   @id @default(cuid())
+  empresaId   String
+  empresa     Empresa                  @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  varreduraId String                   @unique
+  varredura   Varredura                @relation(fields: [varreduraId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  tipoEvento  TipoEventoOperacional
+  descricao   String                   @db.Text
+  metadata    Json?
+  createdAt   DateTime                 @default(now())
+
+  @@index([empresaId])
+  @@index([varreduraId])
+  @@index([tipoEvento])
+}
+
+model PendenciaOperacional {
+  id         String                    @id @default(cuid())
+  empresaId  String
+  empresa    Empresa                   @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  tipo       TipoPendenciaOperacional
+  status     StatusPendenciaOperacional @default(ABERTA)
+  criticidade CriticidadePendenciaOperacional @default(MEDIA)
+  descricao  String                    @db.Text
+  origem     String?
+  resolvedAt DateTime?
+  createdAt  DateTime                  @default(now())
+
+  @@index([empresaId])
+  @@index([status])
+  @@index([empresaId, status, criticidade])
+  @@index([tipo])
+  @@index([createdAt])
+}
+
+model Pendencia {
+  id                         String                 @id @default(cuid())
+  empresaId                  String
+  empresa                    Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  responsavelInternoId       String?
+  responsavelInterno         ResponsavelInterno?    @relation(fields: [responsavelInternoId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  tipo                       TipoPendencia
+  status                     StatusPendencia        @default(ABERTA)
+  prioridade                 PrioridadePendencia    @default(MEDIA)
+  titulo                     String
+  descricao                  String                 @db.Text
+  origem                     String?
+  abertaEm                   DateTime               @default(now())
+  fechadaEm                  DateTime?
+  criadaPorUsuarioInternoId   String?
+  criadaPorUsuarioInterno     UsuarioInterno?       @relation("PendenciaCriadaPor", fields: [criadaPorUsuarioInternoId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  atualizadaPorUsuarioInternoId String?
+  atualizadaPorUsuarioInterno UsuarioInterno?       @relation("PendenciaAtualizadaPor", fields: [atualizadaPorUsuarioInternoId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  createdAt                  DateTime               @default(now())
+  updatedAt                  DateTime               @updatedAt
+  logsExecucao               LogExecucao[]
+
+  @@index([empresaId])
+  @@index([status])
+  @@index([prioridade])
+  @@index([responsavelInternoId])
+  @@index([tipo])
+  @@index([abertaEm])
+}
+
+model LogExecucao {
+  id                        String               @id @default(cuid())
+  empresaId                 String
+  empresa                   Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  pendenciaId               String?
+  pendencia                 Pendencia?           @relation(fields: [pendenciaId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  tipo                      TipoLogExecucao
+  resultado                 ResultadoLogExecucao
+  resumo                    String
+  detalhes                  String?              @db.Text
+  executadoPorUsuarioInternoId String?
+  executadoPorUsuarioInterno UsuarioInterno?      @relation(fields: [executadoPorUsuarioInternoId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  executadoEm               DateTime             @default(now())
+  chaveIdempotencia         String?
+  createdAt                 DateTime             @default(now())
+
+  @@index([empresaId])
+  @@index([pendenciaId])
+  @@index([executadoEm])
+  @@index([tipo])
+  @@index([resultado])
+  @@index([executadoPorUsuarioInternoId])
+  @@index([chaveIdempotencia])
+}
+
+model IntegracaoAcessoriasConfig {
+  id                     String                      @id
+  apiTokenCriptografado   String                      @db.Text
+  status                 StatusIntegracaoAcessorias  @default(NAO_CONFIGURADA)
+  ultimaSincronizacaoEm  DateTime?
+  ultimoErroEm           DateTime?
+  mensagemErroAtual      String?                     @db.Text
+  createdAt              DateTime                    @default(now())
+  updatedAt              DateTime                    @updatedAt
+}
+
+model AcessoriasSyncJob {
+  id            String                  @id @default(cuid())
+  tipoJob       TipoAcessoriasSyncJob
+  status        StatusAcessoriasSyncJob @default(INICIADO)
+  iniciadoEm    DateTime
+  finalizadoEm  DateTime?
+  processados   Int                     @default(0)
+  criados       Int                     @default(0)
+  atualizados   Int                     @default(0)
+  ignorados     Int                     @default(0)
+  falhas        Int                     @default(0)
+  detalhesErro  String?                 @db.Text
+  createdAt     DateTime                @default(now())
+
+  @@index([createdAt])
+}
+
+model AcessoriasSyncCursor {
+  id              String                       @id @default(cuid())
+  tipoCursor      TipoAcessoriasSyncCursor     @default(GERAL)
+  valorCursor     String?                      @db.Text
+  ultimaPagina    Int?
+  ultimaExecucaoEm DateTime?
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+
+  @@unique([tipoCursor])
 }
