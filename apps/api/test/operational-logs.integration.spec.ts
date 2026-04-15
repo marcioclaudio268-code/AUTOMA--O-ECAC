@@ -270,7 +270,7 @@ async function seedOperationalLogsData(
       cnpj: '55555555000155',
       naCarteira: true,
       observacoesOperacionais: 'Empresa importada sem responsavel interno.',
-      pendenciaOperacional: true,
+      pendenciaOperacional: false,
       razaoSocial: 'Empresa Importada Sem Responsavel Ltda',
       regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
       statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
