@@ -6,15 +6,30 @@ import { useParams, useRouter } from 'next/navigation';
 
 import { requireSession, signOut } from '@/lib/auth';
 import {
+  executeManualScan,
+  createCompanyPendencia,
   getCompany,
+  getCompanyOperationalHistory,
+  listEventosOperacionais,
   listResponsaveis,
+  listVarreduras,
+  registerCompanyCheck,
+  registerCompanyOperationalReview,
+  regularizeCompanyOperationalIssue,
   updateCompany,
   type CompanyCreateInput,
+  type CompanyIntegration,
   type CompanyDetailItem,
+  type CompanyOperationalHistory,
+  type CompanyUpdateInput,
+  type EventoOperacionalRecord,
+  type LogExecucaoRecord,
+  type PendenciaOperacionalRecord,
   type RegimeTributario,
   type ResponsavelInternoRecord,
   type StatusAcessoEmpresa,
-  type StatusProcuracaoEmpresa
+  type StatusProcuracaoEmpresa,
+  type VarreduraRecord
 } from '@/lib/api';
 import {
   REGIME_TRIBUTARIO_OPTIONS,
@@ -28,15 +43,30 @@ import {
   formatDateTime,
   toDateTimeLocalValue
 } from '@/lib/formatters';
+import {
+  classifyVigenciaOperacional,
+  formatVigenciaOperacionalLabel,
+  type VigenciaOperacionalStatus
+} from '@/lib/vigencia-operacional';
 import { validateCompanyForm } from '@/lib/validators';
+import {
+  describeOperationalAttention,
+  resolveOperationalPendenciaAberta
+} from './operational-pendencia';
 
 type CompanyFormState = {
   cnpj: string;
   naCarteira: boolean;
   pendenciaOperacional: boolean;
+  certificadoDigitalImplementadoEm: string;
+  certificadoDigitalValidoAte: string;
   nomeFantasia: string;
   observacoesOperacionais: string;
+  ultimaConferenciaAcessoEm: string;
   ultimaConferenciaOperacionalEm: string;
+  ultimaConferenciaProcuracaoEm: string;
+  procuracaoImplementadaEm: string;
+  procuracaoValidaAte: string;
   razaoSocial: string;
   regimeTributario: RegimeTributario;
   responsavelInternoId: string;
@@ -44,13 +74,28 @@ type CompanyFormState = {
   statusProcuracao: StatusProcuracaoEmpresa;
 };
 
+type OperationalQuickAction =
+  | 'executarVarreduraManual'
+  | 'registrarConferencia'
+  | 'registrarRevisaoOperacional'
+  | 'marcarAcessoDisponivel'
+  | 'marcarProcuracaoValida'
+  | 'regularizarPendenciaOperacional'
+  | 'reabrirPendenciaOperacional';
+
 const initialFormState: CompanyFormState = {
   cnpj: '',
   naCarteira: false,
   pendenciaOperacional: false,
+  certificadoDigitalImplementadoEm: '',
+  certificadoDigitalValidoAte: '',
   nomeFantasia: '',
   observacoesOperacionais: '',
+  ultimaConferenciaAcessoEm: '',
   ultimaConferenciaOperacionalEm: '',
+  ultimaConferenciaProcuracaoEm: '',
+  procuracaoImplementadaEm: '',
+  procuracaoValidaAte: '',
   razaoSocial: '',
   regimeTributario: 'SIMPLES_NACIONAL',
   responsavelInternoId: '',
@@ -58,15 +103,36 @@ const initialFormState: CompanyFormState = {
   statusProcuracao: 'NAO_VERIFICADA'
 };
 
+const OPERATIONAL_CHECK_BLOCKED_MESSAGE =
+  'Nao e possivel registrar conferencia operacional enquanto houver pendencia operacional aberta.';
+
 function buildPayload(form: CompanyFormState): CompanyCreateInput {
   return {
     cnpj: form.cnpj.trim(),
     naCarteira: form.naCarteira,
+    certificadoDigitalImplementadoEm: form.certificadoDigitalImplementadoEm.trim()
+      ? new Date(form.certificadoDigitalImplementadoEm).toISOString()
+      : null,
+    certificadoDigitalValidoAte: form.certificadoDigitalValidoAte.trim()
+      ? new Date(form.certificadoDigitalValidoAte).toISOString()
+      : null,
     pendenciaOperacional: form.pendenciaOperacional,
     nomeFantasia: form.nomeFantasia.trim() || undefined,
     observacoesOperacionais: form.observacoesOperacionais.trim() || undefined,
+    ultimaConferenciaAcessoEm: form.ultimaConferenciaAcessoEm.trim()
+      ? new Date(form.ultimaConferenciaAcessoEm).toISOString()
+      : null,
     ultimaConferenciaOperacionalEm: form.ultimaConferenciaOperacionalEm.trim()
       ? new Date(form.ultimaConferenciaOperacionalEm).toISOString()
+      : null,
+    ultimaConferenciaProcuracaoEm: form.ultimaConferenciaProcuracaoEm.trim()
+      ? new Date(form.ultimaConferenciaProcuracaoEm).toISOString()
+      : null,
+    procuracaoImplementadaEm: form.procuracaoImplementadaEm.trim()
+      ? new Date(form.procuracaoImplementadaEm).toISOString()
+      : null,
+    procuracaoValidaAte: form.procuracaoValidaAte.trim()
+      ? new Date(form.procuracaoValidaAte).toISOString()
       : null,
     razaoSocial: form.razaoSocial.trim(),
     regimeTributario: form.regimeTributario,
@@ -80,12 +146,28 @@ function toFormState(company: CompanyDetailItem): CompanyFormState {
   return {
     cnpj: company.cnpj,
     naCarteira: company.naCarteira,
+    certificadoDigitalImplementadoEm: toDateTimeLocalValue(
+      company.certificadoDigitalImplementadoEm
+    ),
+    certificadoDigitalValidoAte: toDateTimeLocalValue(
+      company.certificadoDigitalValidoAte
+    ),
     pendenciaOperacional: company.pendenciaOperacional,
     nomeFantasia: company.nomeFantasia ?? '',
     observacoesOperacionais: company.observacoesOperacionais ?? '',
+    ultimaConferenciaAcessoEm: toDateTimeLocalValue(
+      company.ultimaConferenciaAcessoEm
+    ),
     ultimaConferenciaOperacionalEm: toDateTimeLocalValue(
       company.ultimaConferenciaOperacionalEm
     ),
+    ultimaConferenciaProcuracaoEm: toDateTimeLocalValue(
+      company.ultimaConferenciaProcuracaoEm
+    ),
+    procuracaoImplementadaEm: toDateTimeLocalValue(
+      company.procuracaoImplementadaEm
+    ),
+    procuracaoValidaAte: toDateTimeLocalValue(company.procuracaoValidaAte),
     razaoSocial: company.razaoSocial,
     regimeTributario: company.regimeTributario,
     responsavelInternoId: company.responsavelInterno?.id ?? '',
@@ -100,6 +182,289 @@ function formatResponsavelOption(responsavel: ResponsavelInternoRecord) {
   }`;
 }
 
+function formatOperationalDate(value: string | null | undefined) {
+  return value ? formatDateTime(value) : 'Nao registrada';
+}
+
+function formatOperationalText(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : 'Sem observacoes.';
+}
+
+function formatVigenciaStatus(
+  value: string | null | undefined
+): VigenciaOperacionalStatus {
+  return classifyVigenciaOperacional(value);
+}
+
+function getVigenciaTone(
+  value: VigenciaOperacionalStatus
+): StatusTone {
+  switch (value) {
+    case 'REGULAR':
+      return 'success';
+    case 'A_VENCER':
+      return 'warning';
+    case 'VENCIDO':
+      return 'danger';
+    case 'SEM_INFORMACAO':
+    default:
+      return 'neutral';
+  }
+}
+
+function buildVigenciaNote(
+  implementadoEm: string | null | undefined,
+  validoAte: string | null | undefined
+): string {
+  const parts = [`Implantado em ${formatOperationalDate(implementadoEm)}`];
+
+  if (validoAte) {
+    parts.push(`Valido ate ${formatOperationalDate(validoAte)}`);
+  } else {
+    parts.push('Validade nao informada');
+  }
+
+  return parts.join(' - ');
+}
+
+function formatScanOutcome(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0
+    ? normalized
+    : 'Sem resumo da varredura.';
+}
+
+function formatScanStatusLabel(value: VarreduraRecord['statusExecucao']) {
+  switch (value) {
+    case 'CONCLUIDA':
+      return 'Concluida';
+    case 'FALHA':
+      return 'Falha';
+    case 'INICIADA':
+    default:
+      return 'Iniciada';
+  }
+}
+
+function formatEventTypeLabel(value: EventoOperacionalRecord['tipoEvento']) {
+  switch (value) {
+    case 'VARREDURA_RELEVANTE':
+      return 'Varredura com achado';
+    case 'MUDANCA_ESTADO':
+    default:
+      return 'Mudanca de estado';
+  }
+}
+
+function getEventTone(
+  value: EventoOperacionalRecord['tipoEvento']
+): StatusTone {
+  switch (value) {
+    case 'VARREDURA_RELEVANTE':
+      return 'danger';
+    case 'MUDANCA_ESTADO':
+    default:
+      return 'warning';
+  }
+}
+
+function formatPendenciaTypeLabel(
+  value: PendenciaOperacionalRecord['tipo']
+) {
+  switch (value) {
+    case 'ACESSO':
+      return 'Acesso';
+    case 'PROCURACAO':
+      return 'Procuracao';
+    case 'OPERACIONAL':
+    default:
+      return 'Operacional';
+  }
+}
+
+function formatPendenciaStatusLabel(
+  value: PendenciaOperacionalRecord['status']
+) {
+  switch (value) {
+    case 'RESOLVIDA':
+      return 'Resolvida';
+    case 'ABERTA':
+    default:
+      return 'Aberta';
+  }
+}
+
+function getPendenciaTone(
+  value: PendenciaOperacionalRecord['status']
+): StatusTone {
+  return value === 'RESOLVIDA' ? 'success' : 'danger';
+}
+
+function formatPendenciaCriticidadeLabel(
+  value: PendenciaOperacionalRecord['criticidade']
+) {
+  switch (value) {
+    case 'ALTA':
+      return 'Alta';
+    case 'MEDIA':
+      return 'Media';
+    case 'BAIXA':
+    default:
+      return 'Baixa';
+  }
+}
+
+function getPendenciaCriticidadeTone(
+  value: PendenciaOperacionalRecord['criticidade']
+): StatusTone {
+  switch (value) {
+    case 'ALTA':
+      return 'danger';
+    case 'MEDIA':
+      return 'warning';
+    case 'BAIXA':
+    default:
+      return 'neutral';
+  }
+}
+
+function formatLogTypeLabel(value: LogExecucaoRecord['tipo']) {
+  switch (value) {
+    case 'CONFERENCIA_OPERACIONAL':
+      return 'Conferencia operacional';
+    case 'EDICAO_MANUAL_EMPRESA':
+      return 'Edicao manual da empresa';
+    case 'REGISTRO_PENDENCIA':
+      return 'Registro de pendencia';
+    case 'REGULARIZACAO_PENDENCIA':
+      return 'Regularizacao de pendencia';
+    case 'REVISAO_OPERACIONAL':
+      return 'Revisao operacional';
+    case 'RETIRADA_CARTEIRA':
+    default:
+      return 'Retirada da carteira';
+  }
+}
+
+function formatLogResultLabel(value: LogExecucaoRecord['resultado']) {
+  switch (value) {
+    case 'FALHA':
+      return 'Falha';
+    case 'SEM_ALTERACAO':
+      return 'Sem alteracao';
+    case 'SUCESSO':
+    default:
+      return 'Sucesso';
+  }
+}
+
+function getLogTone(value: LogExecucaoRecord['resultado']): StatusTone {
+  switch (value) {
+    case 'FALHA':
+      return 'danger';
+    case 'SEM_ALTERACAO':
+      return 'neutral';
+    case 'SUCESSO':
+    default:
+      return 'success';
+  }
+}
+
+function getScanTone(
+  value: VarreduraRecord['statusExecucao']
+): StatusTone {
+  switch (value) {
+    case 'CONCLUIDA':
+      return 'success';
+    case 'FALHA':
+      return 'danger';
+    case 'INICIADA':
+    default:
+      return 'warning';
+  }
+}
+
+type StatusTone = 'success' | 'warning' | 'danger' | 'neutral';
+
+function getStatusToneClasses(tone: StatusTone): string {
+  switch (tone) {
+    case 'success':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+    case 'warning':
+      return 'border-amber-200 bg-amber-50 text-amber-800';
+    case 'danger':
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+    case 'neutral':
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-700';
+  }
+}
+
+function getAccessTone(status: StatusAcessoEmpresa): StatusTone {
+  if (status === 'DISPONIVEL') {
+    return 'success';
+  }
+
+  if (status === 'NAO_VERIFICADO') {
+    return 'warning';
+  }
+
+  return 'danger';
+}
+
+function getProcuracaoTone(status: StatusProcuracaoEmpresa): StatusTone {
+  if (status === 'VALIDA') {
+    return 'success';
+  }
+
+  if (status === 'NAO_VERIFICADA') {
+    return 'warning';
+  }
+
+  return 'danger';
+}
+
+function getPendenciaFlagTone(value: boolean): StatusTone {
+  return value ? 'danger' : 'success';
+}
+
+function getIntegrationTone(
+  status: CompanyIntegration['statusIntegracao']
+): StatusTone {
+  switch (status) {
+    case 'ATIVA':
+      return 'success';
+    case 'ERRO':
+      return 'danger';
+    case 'INATIVA':
+      return 'warning';
+    case 'NAO_CONFIGURADA':
+    default:
+      return 'neutral';
+  }
+}
+
+function StatusCard({
+  label,
+  note,
+  tone,
+  value
+}: {
+  label: string;
+  note?: string;
+  tone: StatusTone;
+  value: string;
+}) {
+  return (
+    <div className={`rounded-xl border px-3 py-3 ${getStatusToneClasses(tone)}`}>
+      <p className="text-xs uppercase tracking-[0.18em] opacity-80">{label}</p>
+      <p className="mt-1 text-sm font-semibold">{value}</p>
+      {note ? <p className="mt-1 text-xs leading-5 opacity-90">{note}</p> : null}
+    </div>
+  );
+}
+
 export default function CompanyDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -109,9 +474,20 @@ export default function CompanyDetailPage() {
   const [responsaveis, setResponsaveis] = useState<ResponsavelInternoRecord[]>(
     []
   );
+  const [varreduras, setVarreduras] = useState<VarreduraRecord[]>([]);
+  const [eventosOperacionais, setEventosOperacionais] = useState<
+    EventoOperacionalRecord[]
+  >([]);
+  const [operationalHistory, setOperationalHistory] =
+    useState<CompanyOperationalHistory | null>(null);
   const [form, setForm] = useState<CompanyFormState>(initialFormState);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [resolvingPendenciaId, setResolvingPendenciaId] = useState<
+    string | null
+  >(null);
+  const [activeQuickAction, setActiveQuickAction] =
+    useState<OperationalQuickAction | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -155,6 +531,45 @@ export default function CompanyDetailPage() {
           if (active) {
             setResponsaveis(items);
           }
+
+          try {
+            const scans = await listVarreduras(companyId);
+
+            if (active) {
+              setVarreduras(scans);
+            }
+          } catch {
+            if (active) {
+              setVarreduras([]);
+            }
+          }
+
+          try {
+            const events = await listEventosOperacionais(companyId);
+
+            if (active) {
+              setEventosOperacionais(events);
+            }
+          } catch {
+            if (active) {
+              setEventosOperacionais([]);
+            }
+          }
+
+          try {
+            const history = await getCompanyOperationalHistory(companyId, {
+              take: 6
+            });
+
+            if (active) {
+              setOperationalHistory(history);
+            }
+          } catch {
+            if (active) {
+              setOperationalHistory(null);
+            }
+          }
+
         } catch (responsaveisError) {
           if (!active) {
             return;
@@ -208,6 +623,78 @@ export default function CompanyDetailPage() {
     }
   }
 
+  async function persistCompanyUpdate(
+    payload: CompanyUpdateInput,
+    successMessage: string,
+    quickAction: OperationalQuickAction | null = null
+  ) {
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
+    setIsSaving(true);
+    setActiveQuickAction(quickAction);
+    setError('');
+    setMessage('');
+    setFlashMessage('');
+
+    try {
+      if (!companyId) {
+        throw new Error('Empresa invalida.');
+      }
+
+      const updated = await updateCompany(companyId, payload);
+      setCompany(updated);
+      setForm(toFormState(updated));
+      await refreshOperationalData();
+      setMessage(successMessage);
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Falha ao atualizar empresa.'
+      );
+    } finally {
+      submitLockRef.current = false;
+      setIsSaving(false);
+      setActiveQuickAction(null);
+    }
+  }
+
+  async function runOperationalAction(
+    action: OperationalQuickAction,
+    run: () => Promise<unknown>,
+    successMessage: string
+  ) {
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
+    setIsSaving(true);
+    setActiveQuickAction(action);
+    setError('');
+    setMessage('');
+    setFlashMessage('');
+
+    try {
+      await run();
+      await refreshOperationalData();
+      setMessage(successMessage);
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Falha ao executar acao operacional.'
+      );
+    } finally {
+      submitLockRef.current = false;
+      setIsSaving(false);
+      setActiveQuickAction(null);
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
@@ -224,30 +711,196 @@ export default function CompanyDetailPage() {
       return;
     }
 
-    submitLockRef.current = true;
     setFlashMessage('');
+    await persistCompanyUpdate(
+      buildPayload(form),
+      'Empresa atualizada com sucesso.'
+    );
+  }
+
+  async function handleQuickAction(action: OperationalQuickAction) {
+    if (!companyId) {
+      setError('Empresa invalida.');
+      return;
+    }
+
+    if (action === 'registrarConferencia' && isOperationalCheckBlocked) {
+      setError(OPERATIONAL_CHECK_BLOCKED_MESSAGE);
+      setMessage('');
+      setFlashMessage('');
+      return;
+    }
+
+    switch (action) {
+      case 'registrarConferencia':
+        await runOperationalAction(
+          action,
+          () => registerCompanyCheck(companyId),
+          'Conferencia operacional registrada agora.'
+        );
+        break;
+      case 'registrarRevisaoOperacional':
+        await runOperationalAction(
+          action,
+          () => registerCompanyOperationalReview(companyId),
+          'Revisao operacional registrada.'
+        );
+        break;
+      case 'marcarAcessoDisponivel':
+        await persistCompanyUpdate(
+          {
+            statusAcesso: 'DISPONIVEL'
+          },
+          'Acesso marcado como disponivel.',
+          action
+        );
+        break;
+      case 'marcarProcuracaoValida':
+        await persistCompanyUpdate(
+          {
+            statusProcuracao: 'VALIDA'
+          },
+          'Procuracao marcada como valida.',
+          action
+        );
+        break;
+      case 'regularizarPendenciaOperacional':
+        await runOperationalAction(
+          action,
+          () => regularizeCompanyOperationalIssue(companyId),
+          'Pendencia operacional regularizada.'
+        );
+        break;
+      case 'reabrirPendenciaOperacional':
+        await runOperationalAction(
+          action,
+          () => createCompanyPendencia(companyId),
+          'Pendencia operacional registrada.'
+        );
+        break;
+    }
+  }
+
+  async function refreshOperationalData() {
+    if (!companyId) {
+      throw new Error('Empresa invalida.');
+    }
+
+    const updatedCompany = await getCompany(companyId);
+
+    setCompany(updatedCompany);
+    setForm(toFormState(updatedCompany));
+
+    try {
+      const scans = await listVarreduras(companyId);
+      setVarreduras(scans);
+    } catch {
+      setVarreduras([]);
+    }
+
+    try {
+      const events = await listEventosOperacionais(companyId);
+      setEventosOperacionais(events);
+    } catch {
+      setEventosOperacionais([]);
+    }
+
+    try {
+      const history = await getCompanyOperationalHistory(companyId, {
+        take: 6
+      });
+      setOperationalHistory(history);
+    } catch {
+      setOperationalHistory(null);
+    }
+
+  }
+
+  async function handleManualScan() {
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
     setIsSaving(true);
+    setActiveQuickAction('executarVarreduraManual');
+    setError('');
+    setMessage('');
+    setFlashMessage('');
 
     try {
       if (!companyId) {
         throw new Error('Empresa invalida.');
       }
 
-      const updated = await updateCompany(companyId, buildPayload(form));
-      setCompany(updated);
-      setForm(toFormState(updated));
-      setMessage('Empresa atualizada com sucesso.');
-    } catch (submitError) {
+      const result = await executeManualScan(companyId);
+      await refreshOperationalData();
+      setMessage(result.varredura.resumoResultado || 'Varredura manual executada.');
+    } catch (scanError) {
       setError(
-        submitError instanceof Error
-          ? submitError.message
-          : 'Falha ao atualizar empresa.'
+        scanError instanceof Error
+          ? scanError.message
+          : 'Falha ao executar varredura manual.'
       );
     } finally {
       submitLockRef.current = false;
       setIsSaving(false);
+      setActiveQuickAction(null);
     }
   }
+
+  async function handleResolvePendencia(pendenciaId: string) {
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
+    setIsSaving(true);
+    setResolvingPendenciaId(pendenciaId);
+    setError('');
+    setMessage('');
+    setFlashMessage('');
+
+    try {
+      if (!companyId) {
+        throw new Error('Empresa invalida.');
+      }
+
+      await regularizeCompanyOperationalIssue(companyId, { pendenciaId });
+      await refreshOperationalData();
+      setMessage('Pendencia operacional resolvida.');
+    } catch (resolveError) {
+      setError(
+        resolveError instanceof Error
+          ? resolveError.message
+          : 'Falha ao resolver pendencia operacional.'
+      );
+    } finally {
+      submitLockRef.current = false;
+      setIsSaving(false);
+      setResolvingPendenciaId(null);
+    }
+  }
+
+  const hasOpenOperationalPendencias = resolveOperationalPendenciaAberta(
+    company,
+    operationalHistory
+  );
+  const isOperationalCheckBlocked = hasOpenOperationalPendencias;
+  const operationalAttention = company
+    ? describeOperationalAttention(company, hasOpenOperationalPendencias)
+    : null;
+  const certificadoDigitalVigencia: VigenciaOperacionalStatus = company
+    ? formatVigenciaStatus(company.certificadoDigitalValidoAte)
+    : 'SEM_INFORMACAO';
+  const procuracaoVigencia: VigenciaOperacionalStatus = company
+    ? formatVigenciaStatus(company.procuracaoValidaAte)
+    : 'SEM_INFORMACAO';
+  const pendenciasAbertas = operationalHistory?.pendenciasAbertas ?? [];
+  const pendenciasEncerradasRecentes =
+    operationalHistory?.pendenciasEncerradasRecentes ?? [];
+  const logsRecentes = operationalHistory?.logs ?? [];
+  const ultimoLogRelevante = operationalHistory?.ultimoLog ?? null;
 
   if (loading) {
     return (
@@ -263,13 +916,14 @@ export default function CompanyDetailPage() {
         <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
             <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-500">
-              ECAC AUTOMAÇÃO
+              ECAC AUTOMACAO
             </p>
             <h1 className="text-3xl font-semibold text-slate-950">
               {company?.razaoSocial ?? 'Detalhe da empresa'}
             </h1>
             <p className="text-sm text-slate-600">
-              Visualizacao e edicao basica do cadastro operacional.
+              Dossie operacional consolidado da empresa, com leitura direta do
+              estado atual, das pendencias e do historico recente.
             </p>
           </div>
 
@@ -291,6 +945,12 @@ export default function CompanyDetailPage() {
               href="/carteira"
             >
               Carteira
+            </Link>
+            <Link
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400"
+              href="/pendencias"
+            >
+              Pendencias
             </Link>
             <button
               className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
@@ -322,14 +982,609 @@ export default function CompanyDetailPage() {
         ) : null}
 
         {company ? (
-          <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-            <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">
+                    Centro operacional da empresa
+                  </p>
+                  <h2 className="text-xl font-semibold text-slate-950">
+                    Tratar acesso, procuracao e pendencia operacional
+                  </h2>
+                  <p className="max-w-2xl text-sm leading-6 text-slate-600">
+                    A tela prioriza os sinais de atencao e os atalhos de
+                    tratamento para manter o trabalho no mesmo registro.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                    <span>{formatCnpj(company.cnpj)}</span>
+                    <span className="text-slate-300">-</span>
+                    <span>{company.nomeFantasia || company.razaoSocial}</span>
+                  </div>
+                </div>
+
+                {operationalAttention ? (
+                  <div
+                    className={`rounded-2xl border p-4 ${getStatusToneClasses(operationalAttention.tone)}`}
+                  >
+                    <p className="text-xs font-medium uppercase tracking-[0.22em] opacity-80">
+                      Leitura operacional
+                    </p>
+                    <p className="mt-1 text-sm font-semibold">
+                      {operationalAttention.title}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {operationalAttention.items.length === 0 ? (
+                        <span className="rounded-full border border-white/60 bg-white/70 px-3 py-1 text-xs font-medium text-inherit">
+                          Nenhuma irregularidade aberta.
+                        </span>
+                      ) : (
+                        operationalAttention.items.map((item) => (
+                          <span
+                            className="rounded-full border border-white/60 bg-white/70 px-3 py-1 text-xs font-medium text-inherit"
+                            key={item}
+                          >
+                            {item}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <StatusCard
+                    label="Status de acesso"
+                    note={
+                      company.statusAcesso === 'DISPONIVEL'
+                        ? 'Acesso regular'
+                        : company.statusAcesso === 'NAO_VERIFICADO'
+                          ? 'Pendente de conferencia'
+                          : 'Requer tratamento'
+                    }
+                    tone={getAccessTone(company.statusAcesso)}
+                    value={STATUS_ACESSO_LABELS[company.statusAcesso]}
+                  />
+                  <StatusCard
+                    label="Status de procuracao"
+                    note={
+                      company.statusProcuracao === 'VALIDA'
+                        ? 'Procuracao regular'
+                        : company.statusProcuracao === 'NAO_VERIFICADA'
+                          ? 'Pendente de conferencia'
+                          : 'Requer tratamento'
+                    }
+                    tone={getProcuracaoTone(company.statusProcuracao)}
+                    value={STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
+                  />
+                  <StatusCard
+                    label="Pendencia operacional"
+                    note={
+                      hasOpenOperationalPendencias
+                        ? 'A fila deve tratar'
+                        : 'Sem pendencia aberta'
+                    }
+                    tone={getPendenciaFlagTone(hasOpenOperationalPendencias)}
+                    value={hasOpenOperationalPendencias ? 'Aberta' : 'Fechada'}
+                  />
+                  <StatusCard
+                    label="Responsavel interno"
+                    note={
+                      company.responsavelInterno
+                        ? company.responsavelInterno.email
+                        : 'Vinculo pendente'
+                    }
+                    tone={company.responsavelInterno ? 'neutral' : 'warning'}
+                    value={
+                      company.responsavelInterno
+                        ? company.responsavelInterno.nome
+                        : 'Sem responsavel'
+                    }
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">
+                    Vigencias manuais
+                  </p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <StatusCard
+                      label="Certificado digital"
+                      note={buildVigenciaNote(
+                        company.certificadoDigitalImplementadoEm,
+                        company.certificadoDigitalValidoAte
+                      )}
+                      tone={getVigenciaTone(certificadoDigitalVigencia)}
+                      value={formatVigenciaOperacionalLabel(
+                        certificadoDigitalVigencia
+                      )}
+                    />
+                    <StatusCard
+                      label="Procuracao"
+                      note={buildVigenciaNote(
+                        company.procuracaoImplementadaEm,
+                        company.procuracaoValidaAte
+                      )}
+                      tone={getVigenciaTone(procuracaoVigencia)}
+                      value={formatVigenciaOperacionalLabel(
+                        procuracaoVigencia
+                      )}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <aside className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-900">
+                  Acoes rapidas
+                </p>
+                <p className="text-sm leading-6 text-slate-600">
+                  Use estes atalhos para registrar a situacao operacional sem
+                  sair da empresa.
+                </p>
+                <div className="grid gap-3">
+                  <div className="space-y-1">
+                    <button
+                      className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={isSaving}
+                      onClick={() =>
+                        void handleQuickAction('registrarRevisaoOperacional')
+                      }
+                      type="button"
+                    >
+                      {activeQuickAction === 'registrarRevisaoOperacional'
+                        ? 'Registrando...'
+                        : 'Registrar revisao operacional'}
+                    </button>
+                    <p className="text-xs leading-5 text-slate-500">
+                      Registra uma revisao sem encerrar a pendencia.
+                    </p>
+                  </div>
+                  <button
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() => void handleManualScan()}
+                    type="button"
+                    >
+                    {activeQuickAction === 'executarVarreduraManual'
+                      ? 'Executando...'
+                      : 'Executar varredura manual'}
+                  </button>
+                  <div className="space-y-1">
+                    <button
+                      className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={isSaving || isOperationalCheckBlocked}
+                      onClick={() =>
+                        void handleQuickAction('registrarConferencia')
+                      }
+                      title={
+                        isOperationalCheckBlocked
+                          ? OPERATIONAL_CHECK_BLOCKED_MESSAGE
+                          : undefined
+                      }
+                      type="button"
+                    >
+                      {activeQuickAction === 'registrarConferencia'
+                        ? 'Registrando...'
+                        : 'Registrar conferencia agora'}
+                    </button>
+                    {isOperationalCheckBlocked ? (
+                      <p className="text-xs leading-5 text-rose-700">
+                        {OPERATIONAL_CHECK_BLOCKED_MESSAGE}
+                      </p>
+                    ) : null}
+                  </div>
+                  <button
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() =>
+                      void handleQuickAction('marcarAcessoDisponivel')
+                    }
+                    type="button"
+                  >
+                    {activeQuickAction === 'marcarAcessoDisponivel'
+                      ? 'Aplicando...'
+                      : 'Marcar acesso como disponivel'}
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() =>
+                      void handleQuickAction('marcarProcuracaoValida')
+                    }
+                    type="button"
+                  >
+                    {activeQuickAction === 'marcarProcuracaoValida'
+                      ? 'Aplicando...'
+                      : 'Marcar procuracao como valida'}
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() =>
+                      void handleQuickAction(
+                        'regularizarPendenciaOperacional'
+                      )
+                    }
+                    type="button"
+                  >
+                    {activeQuickAction === 'regularizarPendenciaOperacional'
+                      ? 'Aplicando...'
+                      : 'Marcar pendencia operacional como regularizada'}
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isSaving}
+                    onClick={() =>
+                      void handleQuickAction('reabrirPendenciaOperacional')
+                    }
+                    type="button"
+                  >
+                    {activeQuickAction === 'reabrirPendenciaOperacional'
+                      ? 'Aplicando...'
+                      : 'Reabrir pendencia operacional'}
+                  </button>
+                </div>
+                <Link
+                  className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400"
+                  href={`/pendencias?empresaId=${company.id}`}
+                >
+                  Ver pendencias desta empresa
+                </Link>
+                <p className="text-xs leading-5 text-slate-500">
+                  As acoes salvam imediatamente no registro da empresa e
+                  atualizam o painel de pendencias na proxima consulta.
+                </p>
+              </aside>
+            </div>
+          </section>
+        ) : null}
+
+        {company ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+              <div className="space-y-1">
+                <p className="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">
+                  Dossie operacional
+                </p>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  Contexto consolidado da empresa
+                </h2>
+                <p className="max-w-3xl text-sm leading-6 text-slate-600">
+                  Leitura direta do snapshot atual, das pendencias em aberto, das
+                  ultimas regularizacoes e dos registros mais recentes da
+                  operacao.
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                {ultimoLogRelevante ? (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                      Ultimo movimento
+                    </p>
+                    <p className="font-medium text-slate-900">
+                      {formatLogTypeLabel(ultimoLogRelevante.tipo)}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      {formatDateTime(ultimoLogRelevante.executadoEm)} -{' '}
+                      {ultimoLogRelevante.executadoPorUsuarioInternoNome}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                      Ultimo movimento
+                    </p>
+                    <p className="font-medium text-slate-900">
+                      Sem log operacional recente
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <StatusCard
+                label="Status de acesso"
+                note="Leitura atual do cadastro operacional."
+                tone={getAccessTone(company.statusAcesso)}
+                value={STATUS_ACESSO_LABELS[company.statusAcesso]}
+              />
+              <StatusCard
+                label="Status de procuracao"
+                note="Leitura atual do cadastro operacional."
+                tone={getProcuracaoTone(company.statusProcuracao)}
+                value={STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
+              />
+              <StatusCard
+                label="Pendencias abertas"
+                note="Itens ainda pendentes de tratamento."
+                tone={pendenciasAbertas.length > 0 ? 'danger' : 'success'}
+                value={String(pendenciasAbertas.length)}
+              />
+              <StatusCard
+                label="Ultimas encerradas"
+                note="Pendencias resolvidas recentemente."
+                tone={
+                  pendenciasEncerradasRecentes.length > 0 ? 'neutral' : 'success'
+                }
+                value={String(pendenciasEncerradasRecentes.length)}
+              />
+            </div>
+
+            <div className="mt-5 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-4 sm:grid sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Ultima conferencia
+                      </p>
+                      <p className="text-sm font-medium text-slate-900">
+                        {formatOperationalDate(
+                          company.ultimaConferenciaOperacionalEm
+                        )}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Ultima regularizacao
+                      </p>
+                      <p className="text-sm font-medium text-slate-900">
+                        {formatOperationalDate(company.regularizadaEm)}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Responsavel atual
+                      </p>
+                      <p className="text-sm font-medium text-slate-900">
+                        {company.responsavelInterno?.nome ?? 'Sem responsavel'}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        Na carteira
+                      </p>
+                      <p className="text-sm font-medium text-slate-900">
+                        {company.naCarteira ? 'Sim' : 'Nao'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Observacoes operacionais atuais
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Contexto manual consolidado da empresa.
+                      </p>
+                    </div>
+                    <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Snapshot atual
+                    </span>
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                    {formatOperationalText(company.observacoesOperacionais)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Ultimos logs relevantes
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Quem mexeu por ultimo, quando e com qual resultado.
+                      </p>
+                    </div>
+                    <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      {logsRecentes.length} registro(s)
+                    </span>
+                  </div>
+                  {logsRecentes.length === 0 ? (
+                    <p className="mt-3 rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-600">
+                      Nenhum log operacional recente registrado.
+                    </p>
+                  ) : (
+                    <ul className="mt-3 space-y-3">
+                      {logsRecentes.slice(0, 4).map((log) => (
+                        <li
+                          className="rounded-xl border border-slate-200 bg-white p-4"
+                          key={log.id}
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                              <p className="text-sm font-semibold text-slate-900">
+                                {log.resumo}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {formatDateTime(log.executadoEm)} -{' '}
+                                {log.executadoPorUsuarioInternoNome}
+                              </p>
+                            </div>
+                            <span
+                              className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                getLogTone(log.resultado)
+                              )}`}
+                            >
+                              {formatLogResultLabel(log.resultado)}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-500">
+                            {formatLogTypeLabel(log.tipo)}
+                          </p>
+                          {log.detalhes ? (
+                            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                              {log.detalhes}
+                            </p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Pendencias abertas
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Itens que ainda exigem tratamento nesta empresa.
+                      </p>
+                    </div>
+                    <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      {pendenciasAbertas.length} aberta(s)
+                    </span>
+                  </div>
+                  {pendenciasAbertas.length === 0 ? (
+                    <p className="mt-3 rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-600">
+                      Nenhuma pendencia aberta no dossie atual.
+                    </p>
+                  ) : (
+                    <ul className="mt-3 space-y-3">
+                      {pendenciasAbertas.map((pendencia) => (
+                        <li
+                          className="rounded-xl border border-slate-200 bg-white p-4"
+                          key={pendencia.id}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap gap-2">
+                              <span
+                                className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                  getPendenciaCriticidadeTone(
+                                    pendencia.criticidade
+                                  )
+                                )}`}
+                              >
+                                {formatPendenciaCriticidadeLabel(
+                                  pendencia.criticidade
+                                )}
+                              </span>
+                              <span
+                                className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                  getPendenciaTone(pendencia.status)
+                                )}`}
+                              >
+                                {formatPendenciaStatusLabel(pendencia.status)}
+                              </span>
+                            </div>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {pendencia.titulo}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {formatPendenciaTypeLabel(pendencia.tipo)} - aberta
+                              em {formatDateTime(pendencia.abertaEm)}
+                            </p>
+                            <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                              {pendencia.descricao}
+                            </p>
+                            <div className="flex justify-end">
+                              <button
+                                className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={isSaving}
+                                onClick={() =>
+                                  void handleResolvePendencia(pendencia.id)
+                                }
+                                type="button"
+                              >
+                                {resolvingPendenciaId === pendencia.id && isSaving
+                                  ? 'Resolvendo...'
+                                  : 'Marcar como resolvida'}
+                              </button>
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Ultimas pendencias encerradas
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Regularizacoes recentes para leitura rapida do historico.
+                      </p>
+                    </div>
+                    <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      {pendenciasEncerradasRecentes.length} encerrada(s)
+                    </span>
+                  </div>
+                  {pendenciasEncerradasRecentes.length === 0 ? (
+                    <p className="mt-3 rounded-xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-600">
+                      Nenhuma pendencia encerrada recentemente.
+                    </p>
+                  ) : (
+                    <ul className="mt-3 space-y-3">
+                      {pendenciasEncerradasRecentes.map((pendencia) => (
+                        <li
+                          className="rounded-xl border border-slate-200 bg-white p-4"
+                          key={pendencia.id}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap gap-2">
+                              <span
+                                className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                  getPendenciaTone(pendencia.status)
+                                )}`}
+                              >
+                                {formatPendenciaStatusLabel(pendencia.status)}
+                              </span>
+                              <span
+                                className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                                  getPendenciaCriticidadeTone(
+                                    pendencia.criticidade
+                                  )
+                                )}`}
+                              >
+                                {formatPendenciaCriticidadeLabel(
+                                  pendencia.criticidade
+                                )}
+                              </span>
+                            </div>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {pendencia.titulo}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {formatPendenciaTypeLabel(pendencia.tipo)} - encerrada
+                              em {formatOperationalDate(pendencia.fechadaEm)}
+                            </p>
+                            <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                              {pendencia.descricao}
+                            </p>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {company ? (
+          <div className="grid gap-6 lg:grid-cols-[0.92fr_1.08fr]">
+            <section className="order-2 space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Dados da empresa
+                  Cadastro e apoio
                 </h2>
                 <p className="text-sm text-slate-600">
-                  Informacoes atuais vindas da API.
+                  Dados de suporte para decidir e editar, sem repetir a leitura
+                  operacional central da tela.
                 </p>
               </div>
 
@@ -344,50 +1599,18 @@ export default function CompanyDetailPage() {
                 </div>
                 <div className="space-y-1">
                   <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Nome fantasia
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {company.nomeFantasia?.trim() || '-'}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
                     Regime tributario
                   </dt>
                   <dd className="text-sm font-medium text-slate-900">
                     {company.regimeTributario}
-                  </dd>
-                </div>
-                <div className="space-y-1">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Status de acesso
-                  </dt>
-                  <dd className="text-sm font-medium text-slate-900">
-                    {STATUS_ACESSO_LABELS[company.statusAcesso]}
-                  </dd>
-                </div>
-                <div className="space-y-1">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Status de procuracao
-                  </dt>
-                  <dd className="text-sm font-medium text-slate-900">
-                    {STATUS_PROCURACAO_LABELS[company.statusProcuracao]}
-                  </dd>
-                </div>
-                <div className="space-y-1">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Ultima conferencia operacional
-                  </dt>
-                  <dd className="text-sm font-medium text-slate-900">
-                    {formatDateTime(company.ultimaConferenciaOperacionalEm)}
-                  </dd>
-                </div>
-                <div className="space-y-1">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Pendencia operacional
-                  </dt>
-                  <dd className="text-sm font-medium text-slate-900">
-                    {company.pendenciaOperacional ? 'Sim' : 'Nao'}
-                  </dd>
-                </div>
-                <div className="space-y-1">
-                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    Regularizada em
-                  </dt>
-                  <dd className="text-sm font-medium text-slate-900">
-                    {formatDateTime(company.regularizadaEm)}
                   </dd>
                 </div>
                 <div className="space-y-1">
@@ -398,6 +1621,54 @@ export default function CompanyDetailPage() {
                     {company.responsavelInterno
                       ? company.responsavelInterno.nome
                       : '-'}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Ultima conferencia de acesso
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.ultimaConferenciaAcessoEm)}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Ultima conferencia de procuracao
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.ultimaConferenciaProcuracaoEm)}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Certificado digital implementado em
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.certificadoDigitalImplementadoEm)}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Certificado digital valido ate
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.certificadoDigitalValidoAte)}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Procuracao implementada em
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.procuracaoImplementadaEm)}
+                  </dd>
+                </div>
+                <div className="space-y-1">
+                  <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    Procuracao valida ate
+                  </dt>
+                  <dd className="text-sm font-medium text-slate-900">
+                    {formatDateTime(company.procuracaoValidaAte)}
                   </dd>
                 </div>
                 <div className="space-y-1">
@@ -434,43 +1705,203 @@ export default function CompanyDetailPage() {
                 </div>
               </dl>
 
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  Observacoes operacionais
-                </h3>
-                <p className="whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                  {company.observacoesOperacionais?.trim() || '-'}
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-slate-900">
-                  Integracoes
-                </h3>
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Integracoes
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Estado atual da integracao existente na empresa.
+                    </p>
+                  </div>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    {company.integracoes.length} registro(s)
+                  </span>
+                </div>
                 {company.integracoes.length === 0 ? (
-                  <p className="text-sm text-slate-600">Sem integracoes registradas.</p>
+                  <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
+                    Sem integracoes registradas.
+                  </p>
                 ) : (
-                  <ul className="space-y-2">
+                  <ul className="space-y-3">
                     {company.integracoes.map((integration) => (
                       <li
-                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700"
+                        className="rounded-2xl border border-slate-200 bg-white p-4"
                         key={integration.id}
                       >
-                        {integration.tipoIntegracao} - {integration.statusIntegracao}
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold text-slate-900">
+                              {integration.tipoIntegracao}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Atualizado em {formatDateTime(integration.updatedAt)}
+                            </p>
+                          </div>
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                              getIntegrationTone(integration.statusIntegracao)
+                            )}`}
+                          >
+                            {integration.statusIntegracao}
+                          </span>
+                        </div>
+                        {integration.observacoes ? (
+                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                            {integration.observacoes}
+                          </p>
+                        ) : null}
+                        {integration.mensagemErroAtual ? (
+                          <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                            {integration.mensagemErroAtual}
+                          </p>
+                        ) : null}
+                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
+                          {integration.ultimoSucessoEm ? (
+                            <span>
+                              Ultimo sucesso {formatDateTime(integration.ultimoSucessoEm)}
+                            </span>
+                          ) : null}
+                          {integration.ultimoErroEm ? (
+                            <span>
+                              Ultimo erro {formatDateTime(integration.ultimoErroEm)}
+                            </span>
+                          ) : null}
+                        </div>
                       </li>
                     ))}
                   </ul>
                 )}
               </div>
+
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Varreduras recentes
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Ultimas execucoes manuais registradas para a empresa.
+                    </p>
+                  </div>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    {varreduras.length} registro(s)
+                  </span>
+                </div>
+                {varreduras.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
+                    Nenhuma varredura registrada ainda.
+                  </p>
+                ) : (
+                  <ul className="space-y-3">
+                    {varreduras.map((scan) => (
+                      <li
+                        className="rounded-2xl border border-slate-200 bg-white p-4"
+                        key={scan.id}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold text-slate-900">
+                              Varredura {formatScanStatusLabel(scan.statusExecucao)}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Iniciada em {formatDateTime(scan.iniciadoEm)}
+                            </p>
+                          </div>
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                              getScanTone(scan.statusExecucao)
+                            )}`}
+                          >
+                            {formatScanStatusLabel(scan.statusExecucao)}
+                          </span>
+                        </div>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          <div className="space-y-1">
+                            <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                              Finalizada em
+                            </dt>
+                            <dd className="text-sm font-medium text-slate-900">
+                              {formatDateTime(scan.finalizadoEm)}
+                            </dd>
+                          </div>
+                          <div className="space-y-1">
+                            <dt className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                              Resultado
+                            </dt>
+                            <dd className="text-sm font-medium text-slate-900">
+                              {formatScanOutcome(scan.resumoResultado)}
+                            </dd>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Eventos operacionais recentes
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Consequencias auditaveis das varreduras manuais da empresa.
+                    </p>
+                  </div>
+                  <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    {eventosOperacionais.length} registro(s)
+                  </span>
+                </div>
+                {eventosOperacionais.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600">
+                    Nenhum evento operacional recente registrado.
+                  </p>
+                ) : (
+                  <ul className="space-y-3">
+                    {eventosOperacionais.map((event) => (
+                      <li
+                        className="rounded-2xl border border-slate-200 bg-white p-4"
+                        key={event.id}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold text-slate-900">
+                              {formatEventTypeLabel(event.tipoEvento)}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {formatDateTime(event.createdAt)}
+                            </p>
+                          </div>
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-medium ${getStatusToneClasses(
+                              getEventTone(event.tipoEvento)
+                            )}`}
+                          >
+                            {formatEventTypeLabel(event.tipoEvento)}
+                          </span>
+                        </div>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                          {event.descricao}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <section className="order-1 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="mb-5">
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Edicao basica e controle operacional
+                  Edicao manual
                 </h2>
                 <p className="text-sm text-slate-600">
-                  Atualize os campos principais e os status manuais da carteira.
+                  Ajuste os campos de cadastro e os marcadores operacionais sem
+                  sair da tela principal de trabalho.
                 </p>
               </div>
 
@@ -669,32 +2100,145 @@ export default function CompanyDetailPage() {
                     </span>
                   </label>
 
-                  <label className="space-y-2 md:col-span-2">
-                    <span className="block text-sm font-medium text-slate-700">
-                      Ultima conferencia operacional
-                    </span>
-                    <input
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
-                      name="ultimaConferenciaOperacionalEm"
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          ultimaConferenciaOperacionalEm: event.target.value
-                        }))
-                      }
-                      type="datetime-local"
-                      value={form.ultimaConferenciaOperacionalEm}
-                    />
-                    <p className="text-xs text-slate-500">
-                      Data e hora da ultima conferencia manual.
-                    </p>
-                  </label>
+                  <div className="grid gap-4 md:col-span-2 md:grid-cols-3">
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Ultima conferencia de acesso
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="ultimaConferenciaAcessoEm"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            ultimaConferenciaAcessoEm: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.ultimaConferenciaAcessoEm}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Ultima conferencia de procuracao
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="ultimaConferenciaProcuracaoEm"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            ultimaConferenciaProcuracaoEm: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.ultimaConferenciaProcuracaoEm}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Ultima conferencia operacional
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="ultimaConferenciaOperacionalEm"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            ultimaConferenciaOperacionalEm: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.ultimaConferenciaOperacionalEm}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid gap-4 md:col-span-2 md:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Certificado digital implementado em
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="certificadoDigitalImplementadoEm"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            certificadoDigitalImplementadoEm: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.certificadoDigitalImplementadoEm}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Certificado digital valido ate
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="certificadoDigitalValidoAte"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            certificadoDigitalValidoAte: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.certificadoDigitalValidoAte}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Procuracao implementada em
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="procuracaoImplementadaEm"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            procuracaoImplementadaEm: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.procuracaoImplementadaEm}
+                      />
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="block text-sm font-medium text-slate-700">
+                        Procuracao valida ate
+                      </span>
+                      <input
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
+                        name="procuracaoValidaAte"
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            procuracaoValidaAte: event.target.value
+                          }))
+                        }
+                        type="datetime-local"
+                        value={form.procuracaoValidaAte}
+                      />
+                    </label>
+                  </div>
                 </div>
 
                 <label className="space-y-2">
                   <span className="block text-sm font-medium text-slate-700">
                     Observacoes operacionais
                   </span>
+                  <p className="text-xs leading-5 text-slate-500">
+                    Use este campo para contexto, combinados e o proximo passo
+                    operacional.
+                  </p>
                   <textarea
                     className="min-h-32 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-900"
                     name="observacoesOperacionais"
@@ -704,6 +2248,7 @@ export default function CompanyDetailPage() {
                         observacoesOperacionais: event.target.value
                       }))
                     }
+                    placeholder="Registre contexto, pendencias, contato e o proximo passo."
                     value={form.observacoesOperacionais}
                   />
                 </label>
