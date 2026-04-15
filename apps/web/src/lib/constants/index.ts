@@ -1,6 +1,9 @@
 import type {
   RegimeTributario,
   StatusAcessoEmpresa,
+  StatusAcessoriasEmpresaVinculo,
+  StatusAcessoriasSyncJob,
+  StatusIntegracaoAcessorias,
   StatusProcuracaoEmpresa
 } from '@/lib/api';
 
@@ -45,4 +48,33 @@ export const STATUS_PROCURACAO_LABELS: Record<
   NAO_VERIFICADA: 'Nao verificada',
   PENDENTE: 'Pendente',
   VALIDA: 'Valida'
+};
+
+export const STATUS_INTEGRACAO_ACESSORIAS_LABELS: Record<
+  StatusIntegracaoAcessorias,
+  string
+> = {
+  ATIVA: 'Ativa',
+  CONFIGURADA: 'Configurada',
+  ERRO: 'Erro',
+  NAO_CONFIGURADA: 'Nao configurada'
+};
+
+export const STATUS_JOB_ACESSORIAS_LABELS: Record<
+  StatusAcessoriasSyncJob,
+  string
+> = {
+  FALHA: 'Falha',
+  INICIADO: 'Iniciado',
+  SUCESSO: 'Sucesso'
+};
+
+export const STATUS_VINCULO_ACESSORIAS_LABELS: Record<
+  StatusAcessoriasEmpresaVinculo,
+  string
+> = {
+  AMBIGUA: 'Ambigua',
+  IGNORADA: 'Ignorada',
+  NAO_VINCULADA: 'Nao vinculada',
+  VINCULADA: 'Vinculada'
 };

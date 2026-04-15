@@ -26,6 +26,24 @@ export type StatusIntegracao =
   | 'ERRO'
   | 'NAO_CONFIGURADA';
 
+export type StatusIntegracaoAcessorias =
+  | 'NAO_CONFIGURADA'
+  | 'CONFIGURADA'
+  | 'ATIVA'
+  | 'ERRO';
+
+export type TipoAcessoriasSyncJob =
+  | 'TESTE_CONEXAO'
+  | 'SINCRONIZACAO_EMPRESAS';
+
+export type StatusAcessoriasSyncJob = 'INICIADO' | 'SUCESSO' | 'FALHA';
+
+export type StatusAcessoriasEmpresaVinculo =
+  | 'NAO_VINCULADA'
+  | 'VINCULADA'
+  | 'AMBIGUA'
+  | 'IGNORADA';
+
 export type TipoVarredura = 'MANUAL';
 
 export type StatusExecucaoVarredura = 'INICIADA' | 'CONCLUIDA' | 'FALHA';
@@ -323,6 +341,87 @@ export type CompanyIntegration = {
   updatedAt: string;
   ultimoErroEm: string | null;
   ultimoSucessoEm: string | null;
+};
+
+export type AcessoriasConfigRecord = {
+  apiTokenConfigurado: boolean;
+  apiTokenMascarado: string | null;
+  createdAt: string | null;
+  id: string;
+  mensagemErroAtual: string | null;
+  status: StatusIntegracaoAcessorias;
+  ultimaSincronizacaoEm: string | null;
+  ultimoErroEm: string | null;
+  updatedAt: string | null;
+};
+
+export type AcessoriasCompanySummary = {
+  cnpj: string;
+  id: string;
+  nomeFantasia: string | null;
+  razaoSocial: string;
+};
+
+export type AcessoriasCompanyLinkRecord = {
+  acessoriasEmpresaId: string;
+  cnpjExterno: string;
+  createdAt: string;
+  empresa: AcessoriasCompanySummary | null;
+  empresaId: string | null;
+  id: string;
+  matchAutomatico: boolean;
+  nomeExterno: string;
+  sincronizacaoHabilitada: boolean;
+  statusVinculo: StatusAcessoriasEmpresaVinculo;
+  ultimaSincronizacaoEm: string | null;
+  updatedAt: string;
+};
+
+export type AcessoriasCompanySyncSummary = {
+  atualizados: number;
+  criados: number;
+  falhas: number;
+  ignorados: number;
+  pendentes: number;
+  processados: number;
+  vinculadosAutomaticamente: number;
+};
+
+export type AcessoriasCompanySyncResponse = {
+  config: AcessoriasConfigRecord;
+  job: AcessoriasJobRecord;
+  message: string;
+  summary: AcessoriasCompanySyncSummary;
+};
+
+export type AcessoriasJobRecord = {
+  atualizados: number;
+  createdAt: string;
+  criados: number;
+  detalhesErro: string | null;
+  finalizadoEm: string | null;
+  falhas: number;
+  id: string;
+  iniciadoEm: string;
+  ignorados: number;
+  processados: number;
+  status: StatusAcessoriasSyncJob;
+  tipoJob: TipoAcessoriasSyncJob;
+};
+
+export type AcessoriasConfigInput = {
+  apiToken: string;
+};
+
+export type AcessoriasConnectionTestResponse = {
+  config: AcessoriasConfigRecord;
+  job: AcessoriasJobRecord;
+  message: string;
+  success: boolean;
+};
+
+export type AcessoriasCompanyLinkInput = {
+  acessoriasEmpresaId: string;
 };
 
 export type CompanyDetailItem = CompanyBase & {
@@ -858,4 +957,102 @@ export async function updateResponsavel(
     body: payload,
     method: 'PATCH'
   });
+}
+
+export async function getAcessoriasConfig(): Promise<AcessoriasConfigRecord> {
+  return apiRequest<AcessoriasConfigRecord>('/integracoes/acessorias/config');
+}
+
+export async function createAcessoriasConfig(
+  payload: AcessoriasConfigInput
+): Promise<AcessoriasConfigRecord> {
+  return apiRequest<AcessoriasConfigRecord>('/integracoes/acessorias/config', {
+    body: payload,
+    method: 'POST'
+  });
+}
+
+export async function updateAcessoriasConfig(
+  payload: AcessoriasConfigInput
+): Promise<AcessoriasConfigRecord> {
+  return apiRequest<AcessoriasConfigRecord>('/integracoes/acessorias/config', {
+    body: payload,
+    method: 'PATCH'
+  });
+}
+
+export async function testAcessoriasConnection(): Promise<AcessoriasConnectionTestResponse> {
+  return apiRequest<AcessoriasConnectionTestResponse>(
+    '/integracoes/acessorias/test-connection',
+    {
+      method: 'POST'
+    }
+  );
+}
+
+export async function listAcessoriasJobs(filters: {
+  take?: number | undefined;
+} = {}): Promise<AcessoriasJobRecord[]> {
+  const params = new URLSearchParams();
+
+  if (filters.take !== undefined) {
+    params.set('take', String(filters.take));
+  }
+
+  const query = params.toString();
+
+  return apiRequest<AcessoriasJobRecord[]>(
+    query
+      ? `/integracoes/acessorias/jobs?${query}`
+      : '/integracoes/acessorias/jobs'
+  );
+}
+
+export async function listAcessoriasCompanies(): Promise<
+  AcessoriasCompanyLinkRecord[]
+> {
+  return apiRequest<AcessoriasCompanyLinkRecord[]>(
+    '/integracoes/acessorias/empresas'
+  );
+}
+
+export async function listAcessoriasVinculos(): Promise<
+  AcessoriasCompanyLinkRecord[]
+> {
+  return apiRequest<AcessoriasCompanyLinkRecord[]>(
+    '/integracoes/acessorias/empresas/vinculos'
+  );
+}
+
+export async function syncAcessoriasCompanies(): Promise<AcessoriasCompanySyncResponse> {
+  return apiRequest<AcessoriasCompanySyncResponse>(
+    '/integracoes/acessorias/empresas/sync',
+    {
+      method: 'POST'
+    }
+  );
+}
+
+export async function linkAcessoriasCompany(
+  empresaId: string,
+  payload: AcessoriasCompanyLinkInput
+): Promise<AcessoriasCompanyLinkRecord> {
+  return apiRequest<AcessoriasCompanyLinkRecord>(
+    `/integracoes/acessorias/empresas/${empresaId}/link`,
+    {
+      body: payload,
+      method: 'POST'
+    }
+  );
+}
+
+export async function unlinkAcessoriasCompany(
+  empresaId: string
+): Promise<AcessoriasCompanyLinkRecord> {
+  return apiRequest<AcessoriasCompanyLinkRecord>(
+    `/integracoes/acessorias/empresas/${empresaId}/link`,
+    {
+      method: 'DELETE'
+    }
+  );
 }
