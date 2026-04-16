@@ -24,6 +24,7 @@ export type StatusIntegracao =
   | 'ATIVA'
   | 'INATIVA'
   | 'ERRO'
+  | 'NECESSITA_CONFERENCIA'
   | 'NAO_CONFIGURADA';
 
 export type StatusIntegracaoAcessorias =
@@ -338,6 +339,7 @@ export type CompanyIntegration = {
   observacoes: string | null;
   statusIntegracao: StatusIntegracao;
   tipoIntegracao: TipoIntegracao;
+  ultimaExecucaoEm: string | null;
   updatedAt: string;
   ultimoErroEm: string | null;
   ultimoSucessoEm: string | null;

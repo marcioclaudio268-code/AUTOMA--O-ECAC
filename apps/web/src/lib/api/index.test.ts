@@ -84,6 +84,7 @@ test('executeAcessoriasCompanyLoop chama o endpoint certo da execucao controlada
           observacoes: null,
           statusIntegracao: 'ATIVA',
           tipoIntegracao: 'API',
+          ultimaExecucaoEm: '2026-04-14T12:00:00.000Z',
           updatedAt: '2026-04-14T12:00:00.000Z',
           ultimoErroEm: null,
           ultimoSucessoEm: '2026-04-14T12:00:00.000Z'

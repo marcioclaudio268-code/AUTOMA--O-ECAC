@@ -127,6 +127,7 @@ export type AcessoriasCompanyExecutionIntegrationView = {
   observacoes: string | null;
   statusIntegracao: StatusIntegracao;
   tipoIntegracao: TipoIntegracao;
+  ultimaExecucaoEm: string | null;
   updatedAt: string;
   ultimoErroEm: string | null;
   ultimoSucessoEm: string | null;
