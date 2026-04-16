@@ -22,6 +22,11 @@ import {
 import { isBasicCnpj, normalizeCnpj } from '../../../../common/utils/cnpj';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { LogsService } from '../../../logs/logs.service';
+import { ParcelamentosService } from '../../../parcelamentos/parcelamentos.service';
+import type {
+  ParcelamentoSnapshotInput,
+  ParcelamentoSyncResult
+} from '../../../parcelamentos/parcelamentos.types';
 
 import { AcessoriasConfigService } from './acessorias-config.service';
 import { AcessoriasConnectorService } from './acessorias-connector.service';
@@ -35,7 +40,8 @@ import type {
   AcessoriasCompanyExecutionVarreduraView,
   AcessoriasCompanySummaryView,
   AcessoriasCompanySyncResponse,
-  AcessoriasCompanySyncSummaryView
+  AcessoriasCompanySyncSummaryView,
+  AcessoriasParcelamentoExternalRaw
 } from '../acessorias.types';
 
 const companySummarySelect = {
@@ -110,6 +116,8 @@ type LoadedCompanies = {
   lastCursor: string | null;
 };
 
+type NormalizedExternalParcelamento = ParcelamentoSnapshotInput;
+
 type ExecutionFailureReason =
   | 'SEM_CONFIGURACAO'
   | 'SEM_VINCULO'
@@ -144,6 +152,8 @@ type ExecutionOutcome =
     };
 
 const MAX_COMPANY_PAGES = 25;
+const ACESSORIAS_EXECUTION_PENDING_ORIGIN = 'ACESSORIAS_EXECUCAO_EMPRESA';
+const ACESSORIAS_PARCELAMENTO_PENDING_ORIGIN = 'ACESSORIAS_PARCELAMENTO';
 
 @Injectable()
 export class AcessoriasEmpresasService {
@@ -152,6 +162,7 @@ export class AcessoriasEmpresasService {
     private readonly connectorService: AcessoriasConnectorService,
     private readonly jobsService: AcessoriasJobsService,
     private readonly logsService: LogsService,
+    private readonly parcelamentosService: ParcelamentosService,
     private readonly prisma: PrismaService
   ) {}
 
@@ -472,6 +483,7 @@ export class AcessoriasEmpresasService {
 
     const startedAt = new Date();
     let outcome: ExecutionOutcome;
+    let normalizedParcelamentos: NormalizedExternalParcelamento[] = [];
 
     try {
       const token = await this.configService.loadApiToken();
@@ -533,31 +545,61 @@ export class AcessoriasEmpresasService {
             'Vinculo Acessorias inconsistente com o CNPJ da empresa.'
           );
         } else {
+          const parcelamentos = await this.connectorService.fetchParcelamentos(
+            token,
+            {
+              acessoriasEmpresaId: linkedRecord.acessoriasEmpresaId,
+              cnpj: company.cnpj
+            }
+          );
+
+          normalizedParcelamentos = this.normalizeExternalParcelamentos(
+            parcelamentos.items
+          );
+
           outcome = this.buildExecutionSuccessOutcome(
             company,
             linkedRecord,
-            externalCompany
+            externalCompany,
+            normalizedParcelamentos.length
           );
         }
       }
     } catch (error) {
-      outcome = this.buildExecutionFailureOutcome(
-        'FALHA_CONEXAO',
+      outcome = this.buildExecutionFailureOutcomeFromError(
         company,
         linkedRecord,
-        this.normalizeErrorMessage(error)
+        error
       );
     }
 
     const finishedAt = new Date();
 
     return this.prisma.$transaction(async (client) => {
+      let parcelamentoSync: ParcelamentoSyncResult | null = null;
+
+      if (outcome.success) {
+        parcelamentoSync = await this.parcelamentosService.syncCompanyParcelamentos(
+          client,
+          {
+            companyCnpj: company.cnpj,
+            companyId: company.id,
+            companyName: company.razaoSocial,
+            snapshots: normalizedParcelamentos,
+            syncedAt: finishedAt
+          }
+        );
+        outcome = this.mergeExecutionSuccessOutcome(outcome, parcelamentoSync);
+      }
+
       const varredura = await client.varredura.create({
         data: {
           empresaId: company.id,
           finalizadoEm: finishedAt,
           iniciadoEm: startedAt,
-          resumoResultado: outcome.details,
+          resumoResultado: outcome.success
+            ? parcelamentoSync?.resumoResultado ?? outcome.details
+            : outcome.details,
           statusExecucao: outcome.success
             ? StatusExecucaoVarredura.CONCLUIDA
             : StatusExecucaoVarredura.FALHA,
@@ -573,6 +615,8 @@ export class AcessoriasEmpresasService {
       );
 
       let pendenciaId: string | null = null;
+      let ultimoEventoRelevanteEm: Date | null = null;
+      let marcarPendenciaOperacional = false;
 
       if (!outcome.success) {
         if (outcome.actionRequired) {
@@ -584,6 +628,7 @@ export class AcessoriasEmpresasService {
           );
 
           pendenciaId = pendencia.id;
+          marcarPendenciaOperacional = true;
         }
 
         const event = await client.eventoOperacional.create({
@@ -606,27 +651,57 @@ export class AcessoriasEmpresasService {
           }
         });
 
-        const companyEventData: Prisma.EmpresaUpdateInput = {
-          ultimoEventoRelevanteEm: event.createdAt
-        };
-
-        if (pendenciaId) {
-          companyEventData.pendenciaOperacional = true;
-          companyEventData.regularizadaEm = null;
-        }
-
-        await client.empresa.update({
-          data: companyEventData,
-          where: {
-            id: company.id
+        ultimoEventoRelevanteEm = event.createdAt;
+      } else if (
+        parcelamentoSync?.hasRelevantChange &&
+        parcelamentoSync.eventDescription &&
+        parcelamentoSync.eventType
+      ) {
+        const event = await client.eventoOperacional.create({
+          data: {
+            descricao: parcelamentoSync.eventDescription,
+            empresaId: company.id,
+            metadata: {
+              ...parcelamentoSync.eventMetadata,
+              integrationType: 'ACESSORIAS',
+              linkedAcessoriasEmpresaId:
+                linkedRecord?.acessoriasEmpresaId ?? null
+            },
+            tipoEvento: parcelamentoSync.eventType,
+            varreduraId: varredura.id
           }
         });
+
+        ultimoEventoRelevanteEm = event.createdAt;
+      }
+
+      if (outcome.success && parcelamentoSync?.pendingRequired) {
+        const pendencia = await this.createParcelamentoPendencia(
+          client,
+          company,
+          parcelamentoSync,
+          finishedAt
+        );
+
+        pendenciaId = pendencia.id;
+        marcarPendenciaOperacional = true;
+      }
+
+      const companyUpdateData: Prisma.EmpresaUpdateInput = {
+        ultimaVarreduraEm: finishedAt
+      };
+
+      if (ultimoEventoRelevanteEm) {
+        companyUpdateData.ultimoEventoRelevanteEm = ultimoEventoRelevanteEm;
+      }
+
+      if (marcarPendenciaOperacional) {
+        companyUpdateData.pendenciaOperacional = true;
+        companyUpdateData.regularizadaEm = null;
       }
 
       await client.empresa.update({
-        data: {
-          ultimaVarreduraEm: finishedAt
-        },
+        data: companyUpdateData,
         where: {
           id: company.id
         }
@@ -963,24 +1038,28 @@ export class AcessoriasEmpresasService {
   private buildExecutionSuccessOutcome(
     company: CompanyExecutionRecord,
     linkedRecord: VinculoRecord,
-    externalCompany: NormalizedExternalCompany
-  ): ExecutionOutcome {
+    externalCompany: NormalizedExternalCompany,
+    parcelamentosCount: number
+  ): Extract<ExecutionOutcome, { success: true }> {
     const integrationObservacoes = [
       `Ultima validacao confiavel Acessorias em ${company.razaoSocial}.`,
-      `Vinculo externo ${linkedRecord.acessoriasEmpresaId} confirmado para o CNPJ ${company.cnpj}.`
+      `Vinculo externo ${linkedRecord.acessoriasEmpresaId} confirmado para o CNPJ ${company.cnpj}.`,
+      `${parcelamentosCount} parcelamento(s) retornaram da leitura atual.`
     ].join(' ');
 
     return {
       details: [
         `Empresa interna ${company.razaoSocial} validada com a empresa externa ${externalCompany.nomeExterno}.`,
-        `Vinculo Acessorias ${linkedRecord.acessoriasEmpresaId} confirmado para o CNPJ ${company.cnpj}.`
+        `Vinculo Acessorias ${linkedRecord.acessoriasEmpresaId} confirmado para o CNPJ ${company.cnpj}.`,
+        `${parcelamentosCount} parcelamento(s) lidos na execucao atual.`
       ].join(' '),
       externalCompany,
       integrationMessage: `Execucao Acessorias concluida com vinculo validado para ${company.razaoSocial}.`,
       integrationObservacoes,
       logDetails: [
         `Vinculo externo ${externalCompany.acessoriasEmpresaId} localizado.`,
-        `CNPJ conferido: ${externalCompany.cnpjExterno ?? 'nao informado'}.`
+        `CNPJ conferido: ${externalCompany.cnpjExterno ?? 'nao informado'}.`,
+        `${parcelamentosCount} parcelamento(s) lidos.`
       ].join(' '),
       logSummary: `Execucao Acessorias concluida: ${company.razaoSocial}`,
       statusIntegracao: StatusIntegracao.ATIVA,
@@ -988,12 +1067,75 @@ export class AcessoriasEmpresasService {
     };
   }
 
+  private mergeExecutionSuccessOutcome(
+    outcome: Extract<ExecutionOutcome, { success: true }>,
+    parcelamentoSync: ParcelamentoSyncResult
+  ): Extract<ExecutionOutcome, { success: true }> {
+    return {
+      ...outcome,
+      details: parcelamentoSync.resumoResultado,
+      integrationMessage: parcelamentoSync.resumoResultado,
+      integrationObservacoes: [
+        outcome.integrationObservacoes,
+        `${parcelamentoSync.activeCount} parcelamento(s) ativo(s) confirmados.`,
+        parcelamentoSync.actionableCount > 0
+          ? `${parcelamentoSync.actionableCount} parcelamento(s) exigem acao.`
+          : 'Sem parcelamento acionavel na leitura atual.'
+      ].join(' '),
+      logDetails: [outcome.logDetails, parcelamentoSync.logDetails].join(' '),
+      logSummary: parcelamentoSync.logSummary
+    };
+  }
+
+  private buildExecutionFailureOutcomeFromError(
+    company: CompanyExecutionRecord,
+    linkedRecord: VinculoRecord | null,
+    error: unknown
+  ): Extract<ExecutionOutcome, { success: false }> {
+    const message = this.normalizeErrorMessage(error);
+    const lowerCaseMessage = message.toLowerCase();
+
+    if (
+      lowerCaseMessage.includes('acessorias_parcelamentos_url') &&
+      (lowerCaseMessage.includes('nao configurada') ||
+        lowerCaseMessage.includes('invalida'))
+    ) {
+      return this.buildExecutionFailureOutcome(
+        'SEM_CONFIGURACAO',
+        company,
+        linkedRecord,
+        message
+      );
+    }
+
+    if (
+      lowerCaseMessage.includes('parcelamentos') &&
+      (lowerCaseMessage.includes('json valido') ||
+        lowerCaseMessage.includes('lista reconhecivel') ||
+        lowerCaseMessage.includes('inconclusivo'))
+    ) {
+      return this.buildExecutionFailureOutcome(
+        'RETORNO_INCONCLUSIVO',
+        company,
+        linkedRecord,
+        message
+      );
+    }
+
+    return this.buildExecutionFailureOutcome(
+      'FALHA_CONEXAO',
+      company,
+      linkedRecord,
+      message
+    );
+  }
+
   private buildExecutionFailureOutcome(
     reason: ExecutionFailureReason,
     company: CompanyExecutionRecord,
     linkedRecord: VinculoRecord | null,
     message: string
-  ): ExecutionOutcome {
+  ): Extract<ExecutionOutcome, { success: false }> {
     const normalizedMessage =
       this.normalizeText(message, 'Falha na execucao Acessorias da empresa.');
     const actionRequired = this.shouldCreateExecutionPendencia(reason);
@@ -1085,7 +1227,7 @@ export class AcessoriasEmpresasService {
       },
       where: {
         empresaId: company.id,
-        origem: 'ACESSORIAS_EXECUCAO_EMPRESA',
+        origem: ACESSORIAS_EXECUTION_PENDING_ORIGIN,
         status: StatusPendencia.ABERTA,
         tipo: TipoPendencia.OPERACIONAL
       }
@@ -1102,12 +1244,54 @@ export class AcessoriasEmpresasService {
           outcome.pendingDescription ??
           'Execucao Acessorias exige conferencia operacional.',
         empresaId: company.id,
-        origem: 'ACESSORIAS_EXECUCAO_EMPRESA',
+        origem: ACESSORIAS_EXECUTION_PENDING_ORIGIN,
         prioridade: PrioridadePendencia.ALTA,
         responsavelInternoId: company.responsavelInternoId,
         status: StatusPendencia.ABERTA,
         tipo: TipoPendencia.OPERACIONAL,
         titulo: outcome.pendingTitle ?? 'Conferir execucao Acessorias'
+      },
+      select: {
+        id: true
+      }
+    });
+  }
+
+  private async createParcelamentoPendencia(
+    client: Prisma.TransactionClient,
+    company: CompanyExecutionRecord,
+    syncResult: ParcelamentoSyncResult,
+    finishedAt: Date
+  ): Promise<{ id: string }> {
+    const existing = await client.pendencia.findFirst({
+      select: {
+        id: true
+      },
+      where: {
+        empresaId: company.id,
+        origem: ACESSORIAS_PARCELAMENTO_PENDING_ORIGIN,
+        status: StatusPendencia.ABERTA,
+        tipo: TipoPendencia.OPERACIONAL
+      }
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    return await client.pendencia.create({
+      data: {
+        abertaEm: finishedAt,
+        descricao:
+          syncResult.pendingDescription ??
+          'Parcelamentos exigem conferencia operacional.',
+        empresaId: company.id,
+        origem: ACESSORIAS_PARCELAMENTO_PENDING_ORIGIN,
+        prioridade: PrioridadePendencia.ALTA,
+        responsavelInternoId: company.responsavelInternoId,
+        status: StatusPendencia.ABERTA,
+        tipo: TipoPendencia.OPERACIONAL,
+        titulo: syncResult.pendingTitle ?? 'Conferir parcelamentos da empresa'
       },
       select: {
         id: true
@@ -1238,6 +1422,73 @@ export class AcessoriasEmpresasService {
     };
   }
 
+  private normalizeExternalParcelamentos(
+    rawItems: AcessoriasParcelamentoExternalRaw[]
+  ): NormalizedExternalParcelamento[] {
+    if (rawItems.length === 0) {
+      return [];
+    }
+
+    const normalizedItems: NormalizedExternalParcelamento[] = [];
+    const seenReferences = new Set<string>();
+
+    for (const rawItem of rawItems) {
+      const referenciaExterna = this.normalizeIdentifier(
+        rawItem.id ??
+          rawItem.parcelamentoId ??
+          rawItem.codigo ??
+          rawItem.referencia
+      );
+      const modalidade = this.normalizeText(
+        rawItem.modalidade ?? rawItem.tipo ?? rawItem.descricao,
+        ''
+      );
+      const situacao = this.normalizeText(rawItem.situacao ?? rawItem.status, '');
+      const quantidadeParcelas = readNullableInteger(
+        rawItem.quantidadeParcelas ?? rawItem.totalParcelas
+      );
+      const parcelaAtual = readNullableInteger(
+        rawItem.parcelaAtual ?? rawItem.numeroParcelaAtual
+      );
+      const dataVencimentoRelevante = readNullableDate(
+        rawItem.dataVencimentoRelevante ??
+          rawItem.dataVencimento ??
+          rawItem.proximoVencimento
+      );
+      const indicioAtraso =
+        readBooleanFlag(
+          rawItem.indicioAtraso ?? rawItem.emAtraso ?? rawItem.atrasado
+        ) ?? /atras|vencid/i.test(situacao);
+      const requerAcao =
+        readBooleanFlag(rawItem.requerAcao) ?? indicioAtraso;
+
+      if (
+        !referenciaExterna ||
+        !modalidade ||
+        !situacao ||
+        seenReferences.has(referenciaExterna)
+      ) {
+        throw new Error(
+          'Retorno Acessorias inconclusivo para parcelamentos da empresa.'
+        );
+      }
+
+      seenReferences.add(referenciaExterna);
+      normalizedItems.push({
+        dataVencimentoRelevante,
+        indicioAtraso,
+        modalidade,
+        parcelaAtual,
+        quantidadeParcelas,
+        referenciaExterna,
+        requerAcao,
+        situacao
+      });
+    }
+
+    return normalizedItems;
+  }
+
   private mapRecord(record: VinculoRecord): AcessoriasCompanyLinkView {
     return {
       acessoriasEmpresaId: record.acessoriasEmpresaId,
@@ -1308,4 +1559,78 @@ export class AcessoriasEmpresasService {
       ? `Empresa Acessorias ${externalId}: falha inesperada.`
       : 'Falha inesperada na sincronizacao de empresas Acessorias.';
   }
+}
+
+function readNullableInteger(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return value;
+  }
+
+  if (typeof value !== 'string') {
+    throw new Error('Retorno Acessorias inconclusivo para parcelamentos da empresa.');
+  }
+
+  const normalized = value.trim();
+
+  if (!/^-?\d+$/.test(normalized)) {
+    throw new Error('Retorno Acessorias inconclusivo para parcelamentos da empresa.');
+  }
+
+  return Number.parseInt(normalized, 10);
+}
+
+function readNullableDate(value: unknown): Date | null {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+
+  if (typeof value !== 'string') {
+    throw new Error('Retorno Acessorias inconclusivo para parcelamentos da empresa.');
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error('Retorno Acessorias inconclusivo para parcelamentos da empresa.');
+  }
+
+  return date;
+}
+
+function readBooleanFlag(value: unknown): boolean | null {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+
+  if (typeof value !== 'string') {
+    throw new Error('Retorno Acessorias inconclusivo para parcelamentos da empresa.');
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (['1', 'sim', 's', 'true', 'yes'].includes(normalized)) {
+    return true;
+  }
+
+  if (['0', 'nao', 'n', 'false', 'no'].includes(normalized)) {
+    return false;
+  }
+
+  throw new Error('Retorno Acessorias inconclusivo para parcelamentos da empresa.');
 }

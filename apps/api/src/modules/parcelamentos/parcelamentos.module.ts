@@ -1,4 +1,9 @@
 import { Module } from '@nestjs/common';
 
-@Module({})
+import { ParcelamentosService } from './parcelamentos.service';
+
+@Module({
+  providers: [ParcelamentosService],
+  exports: [ParcelamentosService]
+})
 export class ParcelamentosModule {}
