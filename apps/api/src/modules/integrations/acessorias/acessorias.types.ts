@@ -1,7 +1,11 @@
 import type {
   StatusAcessoriasSyncJob,
   StatusIntegracaoAcessorias,
-  TipoAcessoriasSyncJob
+  TipoAcessoriasSyncJob,
+  StatusExecucaoVarredura,
+  StatusIntegracao,
+  TipoIntegracao,
+  TipoVarredura
 } from '@prisma/client';
 
 export type AcessoriasConfigView = {
@@ -113,4 +117,36 @@ export type AcessoriasConnectionTestResponse = {
   job: AcessoriasJobView;
   message: string;
   success: boolean;
+};
+
+export type AcessoriasCompanyExecutionIntegrationView = {
+  createdAt: string;
+  empresaId: string;
+  id: string;
+  mensagemErroAtual: string | null;
+  observacoes: string | null;
+  statusIntegracao: StatusIntegracao;
+  tipoIntegracao: TipoIntegracao;
+  updatedAt: string;
+  ultimoErroEm: string | null;
+  ultimoSucessoEm: string | null;
+};
+
+export type AcessoriasCompanyExecutionVarreduraView = {
+  createdAt: string;
+  empresaId: string;
+  finalizadoEm: string | null;
+  id: string;
+  iniciadoEm: string;
+  resumoResultado: string | null;
+  statusExecucao: StatusExecucaoVarredura;
+  tipoVarredura: TipoVarredura;
+  updatedAt: string;
+};
+
+export type AcessoriasCompanyExecutionResponse = {
+  integration: AcessoriasCompanyExecutionIntegrationView;
+  message: string;
+  success: boolean;
+  varredura: AcessoriasCompanyExecutionVarreduraView;
 };
