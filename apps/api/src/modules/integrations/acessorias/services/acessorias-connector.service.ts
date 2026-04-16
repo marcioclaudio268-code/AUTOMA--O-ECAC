@@ -3,7 +3,8 @@ import { ConfigService } from '@nestjs/config';
 
 import type {
   AcessoriasCompaniesFetchPage,
-  AcessoriasConnectionProbeResult
+  AcessoriasConnectionProbeResult,
+  AcessoriasParcelamentosFetchResult
 } from '../acessorias.types';
 
 const DEFAULT_TIMEOUT_MS = 8_000;
@@ -118,6 +119,74 @@ export class AcessoriasConnectorService {
       }
 
       throw new Error('Falha ao contatar o endpoint de empresas Acessorias.');
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  }
+
+  async fetchParcelamentos(
+    token: string,
+    input: {
+      acessoriasEmpresaId: string;
+      cnpj: string;
+    }
+  ): Promise<AcessoriasParcelamentosFetchResult> {
+    const parcelamentosUrl = this.configService
+      .get<string>('ACESSORIAS_PARCELAMENTOS_URL')
+      ?.trim();
+
+    if (!parcelamentosUrl) {
+      throw new Error(
+        'ACESSORIAS_PARCELAMENTOS_URL nao configurada neste ambiente.'
+      );
+    }
+
+    let parsedUrl: URL;
+
+    try {
+      parsedUrl = new URL(parcelamentosUrl);
+    } catch {
+      throw new Error('ACESSORIAS_PARCELAMENTOS_URL invalida.');
+    }
+
+    parsedUrl.searchParams.set('acessoriasEmpresaId', input.acessoriasEmpresaId);
+    parsedUrl.searchParams.set('empresaId', input.acessoriasEmpresaId);
+    parsedUrl.searchParams.set('cnpj', input.cnpj);
+
+    const controller = new AbortController();
+    const timeoutMs = this.normalizeTimeout(
+      this.configService.get<string>('ACESSORIAS_PARCELAMENTOS_TIMEOUT_MS')
+    );
+    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(parsedUrl, {
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        method: 'GET',
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `Acessorias respondeu ${response.status} ao buscar parcelamentos.`
+        );
+      }
+
+      const payload = this.parseJsonResponse(await response.text());
+      return this.normalizeParcelamentosPayload(payload);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Busca de parcelamentos Acessorias expirou.');
+      }
+
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error('Falha ao contatar o endpoint de parcelamentos Acessorias.');
     } finally {
       clearTimeout(timeoutHandle);
     }
@@ -270,6 +339,45 @@ export class AcessoriasConnectorService {
     };
   }
 
+  private normalizeParcelamentosPayload(
+    payload: unknown
+  ): AcessoriasParcelamentosFetchResult {
+    if (Array.isArray(payload)) {
+      return {
+        items: payload.filter(isRecord) as AcessoriasParcelamentosFetchResult['items']
+      };
+    }
+
+    if (payload && typeof payload === 'object') {
+      const record = payload as Record<string, unknown>;
+      const itemsSource =
+        record.items ??
+        record.parcelamentos ??
+        record.data ??
+        record.results;
+
+      if (Array.isArray(itemsSource)) {
+        return {
+          items: itemsSource.filter(isRecord) as AcessoriasParcelamentosFetchResult['items']
+        };
+      }
+
+      const total = readInteger(
+        record.totalParcelamentos ?? record.total ?? record.count
+      );
+
+      if (total === 0) {
+        return {
+          items: []
+        };
+      }
+    }
+
+    throw new Error(
+      'Resposta de parcelamentos Acessorias sem lista reconhecivel.'
+    );
+  }
+
   private normalizeTimeout(value: string | undefined): number {
     const parsed = Number(value);
 
@@ -292,4 +400,22 @@ function readText(value: unknown): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function readInteger(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return value;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+
+  if (!/^-?\d+$/.test(normalized)) {
+    return null;
+  }
+
+  return Number.parseInt(normalized, 10);
 }

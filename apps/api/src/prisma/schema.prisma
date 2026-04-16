@@ -203,6 +203,7 @@ model Empresa {
   logsExecucao            LogExecucao[]
   varreduras              Varredura[]
   eventosOperacionais     EventoOperacional[]
+  parcelamentos           Parcelamento[]
   acessoriasVinculo       AcessoriasEmpresaVinculo?
 
   @@index([responsavelInternoId])
@@ -333,6 +334,29 @@ model LogExecucao {
   @@index([resultado])
   @@index([executadoPorUsuarioInternoId])
   @@index([chaveIdempotencia])
+}
+
+model Parcelamento {
+  id                     String    @id @default(cuid())
+  empresaId              String
+  empresa                Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  referenciaExterna      String    @db.Text
+  modalidade             String    @db.Text
+  situacao               String    @db.Text
+  quantidadeParcelas     Int?
+  parcelaAtual           Int?
+  dataVencimentoRelevante DateTime?
+  indicioAtraso          Boolean   @default(false)
+  requerAcao             Boolean   @default(false)
+  ativo                  Boolean   @default(true)
+  ultimaAtualizacaoEm    DateTime
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@unique([empresaId, referenciaExterna])
+  @@index([empresaId])
+  @@index([empresaId, ativo])
+  @@index([requerAcao])
 }
 
 model IntegracaoAcessoriasConfig {

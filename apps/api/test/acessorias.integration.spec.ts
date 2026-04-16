@@ -22,7 +22,7 @@ import {
 } from '@prisma/client';
 import EmbeddedPostgres from 'embedded-postgres';
 import * as bcrypt from 'bcrypt';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 
 const TEST_TIMEOUT = 120_000;
 const ADMIN_EMAIL = 'admin@ecac.local';
@@ -54,7 +54,9 @@ let validationServer: ReturnType<typeof createServer> | undefined;
 let expectedToken = VALID_TOKEN;
 let lastAuthorizationHeader = '';
 let externalCompaniesPayload: Array<Record<string, unknown>> = [];
+let externalParcelamentosPayload: unknown[] | Record<string, unknown> = [];
 let probeStatusCode = 200;
+let parcelamentosStatusCode = 200;
 
 beforeAll(async () => {
   tempRoot = await mkdtemp(
@@ -129,6 +131,34 @@ beforeAll(async () => {
       return;
     }
 
+    if (pathname === '/parcelamentos') {
+      if (lastAuthorizationHeader !== `Bearer ${expectedToken}`) {
+        response.writeHead(401, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            error: 'Unauthorized',
+            message: 'Token invalido.'
+          })
+        );
+        return;
+      }
+
+      response.writeHead(parcelamentosStatusCode, {
+        'content-type': 'application/json'
+      });
+      response.end(
+        JSON.stringify(
+          parcelamentosStatusCode >= 200 && parcelamentosStatusCode < 300
+            ? externalParcelamentosPayload
+            : {
+                error: 'ParcelamentosError',
+                message: `Parcelamentos mock respondeu ${parcelamentosStatusCode}.`
+              }
+        )
+      );
+      return;
+    }
+
     response.writeHead(404, { 'content-type': 'application/json' });
     response.end(
       JSON.stringify({
@@ -146,6 +176,7 @@ beforeAll(async () => {
   process.env.ACESSORIAS_TOKEN_ENCRYPTION_KEY = 'acessorias-encryption-secret';
   process.env.ACESSORIAS_TEST_CONNECTION_URL = `${validationServerUrl}/probe`;
   process.env.ACESSORIAS_EMPRESAS_URL = `${validationServerUrl}/companies`;
+  process.env.ACESSORIAS_PARCELAMENTOS_URL = `${validationServerUrl}/parcelamentos`;
 
   runPrismaMigrateDeploy();
   runBackendBuild();
@@ -204,6 +235,15 @@ afterAll(async () => {
     await removeDirectoryWithRetry(tempRoot);
   }
 }, TEST_TIMEOUT);
+
+beforeEach(() => {
+  expectedToken = VALID_TOKEN;
+  externalCompaniesPayload = [];
+  externalParcelamentosPayload = [];
+  lastAuthorizationHeader = '';
+  parcelamentosStatusCode = 200;
+  probeStatusCode = 200;
+});
 
 describe('Acessorias integration', () => {
   test('persiste configuracao e mascara token na leitura', async () => {
@@ -481,6 +521,16 @@ describe('Acessorias integration', () => {
         razaoSocial: 'Empresa Externa Loop Ltda'
       }
     ];
+    externalParcelamentosPayload = [
+      {
+        id: 'parc-loop-1',
+        modalidade: 'Parcelamento Ordinario',
+        parcelaAtual: 2,
+        quantidadeParcelas: 12,
+        requerAcao: false,
+        situacao: 'EM_DIA'
+      }
+    ];
     expectedToken = VALID_TOKEN;
     await requestJson('/integracoes/acessorias/config', {
       body: { apiToken: VALID_TOKEN },
@@ -557,6 +607,20 @@ describe('Acessorias integration', () => {
     expect(logs).toHaveLength(2);
     expect(logs.every((log) => log.tipo === 'REVISAO_OPERACIONAL')).toBe(true);
 
+    const parcelamentos = await prisma.parcelamento.findMany({
+      where: {
+        empresaId: empresaLoop.id
+      }
+    });
+
+    expect(parcelamentos).toHaveLength(1);
+    expect(parcelamentos[0]).toMatchObject({
+      ativo: true,
+      modalidade: 'Parcelamento Ordinario',
+      referenciaExterna: 'parc-loop-1',
+      situacao: 'EM_DIA'
+    });
+
     const pendencias = await prisma.pendencia.findMany({
       where: {
         empresaId: empresaLoop.id
@@ -564,6 +628,243 @@ describe('Acessorias integration', () => {
     });
 
     expect(pendencias).toHaveLength(0);
+  }, TEST_TIMEOUT);
+
+  test('detecta mudanca relevante de parcelamento e gera evento operacional com pendencia automatica', async () => {
+    const empresaParcelamento = await prisma.empresa.create({
+      data: {
+        cnpj: '91919191000148',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Parcelamento ECAC',
+        pendenciaOperacional: false,
+        razaoSocial: 'Empresa Parcelamento ECAC Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: null,
+        statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
+        statusProcuracao: StatusProcuracaoEmpresa.NAO_VERIFICADA
+      }
+    });
+
+    externalCompaniesPayload = [
+      {
+        cnpj: '91919191000148',
+        id: 'ext-parc-1',
+        razaoSocial: 'Empresa Externa Parcelamento Ltda'
+      }
+    ];
+    externalParcelamentosPayload = [
+      {
+        id: 'parcelamento-1',
+        modalidade: 'Parcelamento Federal',
+        parcelaAtual: 1,
+        quantidadeParcelas: 24,
+        requerAcao: false,
+        situacao: 'EM_DIA'
+      }
+    ];
+
+    await requestJson('/integracoes/acessorias/config', {
+      body: { apiToken: VALID_TOKEN },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+    await requestJson('/integracoes/acessorias/empresas/sync', {
+      cookie: sessionCookie,
+      method: 'POST'
+    });
+
+    const firstExecution = await requestJson(
+      `/integracoes/acessorias/empresas/${empresaParcelamento.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(firstExecution.response.status).toBe(200);
+    expect(firstExecution.body).toMatchObject({
+      success: true,
+      integration: {
+        statusIntegracao: 'ATIVA'
+      }
+    });
+
+    externalParcelamentosPayload = [
+      {
+        id: 'parcelamento-1',
+        indicioAtraso: true,
+        modalidade: 'Parcelamento Federal',
+        parcelaAtual: 2,
+        quantidadeParcelas: 24,
+        requerAcao: true,
+        situacao: 'EM_ATRASO'
+      }
+    ];
+
+    const secondExecution = await requestJson(
+      `/integracoes/acessorias/empresas/${empresaParcelamento.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(secondExecution.response.status).toBe(200);
+    expect(secondExecution.body).toMatchObject({
+      success: true,
+      integration: {
+        statusIntegracao: 'ATIVA'
+      }
+    });
+
+    const [parcelamento, pendencia, evento] = await Promise.all([
+      prisma.parcelamento.findFirstOrThrow({
+        where: {
+          empresaId: empresaParcelamento.id,
+          referenciaExterna: 'parcelamento-1'
+        }
+      }),
+      prisma.pendencia.findFirstOrThrow({
+        where: {
+          empresaId: empresaParcelamento.id,
+          origem: 'ACESSORIAS_PARCELAMENTO'
+        }
+      }),
+      prisma.eventoOperacional.findFirstOrThrow({
+        orderBy: {
+          createdAt: 'desc'
+        },
+        where: {
+          empresaId: empresaParcelamento.id
+        }
+      })
+    ]);
+
+    expect(parcelamento).toMatchObject({
+      indicioAtraso: true,
+      modalidade: 'Parcelamento Federal',
+      parcelaAtual: 2,
+      referenciaExterna: 'parcelamento-1',
+      requerAcao: true,
+      situacao: 'EM_ATRASO'
+    });
+    expect(pendencia).toMatchObject({
+      status: 'ABERTA',
+      tipo: 'OPERACIONAL'
+    });
+    expect(evento.descricao).toContain('Mudancas de parcelamento');
+    expect(JSON.stringify(evento.metadata)).toContain('parcelamento-1');
+  }, TEST_TIMEOUT);
+
+  test('retorno inconclusivo de parcelamentos nao apaga o ultimo estado confiavel persistido', async () => {
+    const empresaConfiavel = await prisma.empresa.create({
+      data: {
+        cnpj: '92929292000120',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Parcelamento Confiavel',
+        pendenciaOperacional: false,
+        razaoSocial: 'Empresa Parcelamento Confiavel Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: null,
+        statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
+        statusProcuracao: StatusProcuracaoEmpresa.NAO_VERIFICADA
+      }
+    });
+
+    externalCompaniesPayload = [
+      {
+        cnpj: '92929292000120',
+        id: 'ext-confiavel-parc-1',
+        razaoSocial: 'Empresa Externa Parcelamento Confiavel Ltda'
+      }
+    ];
+    externalParcelamentosPayload = [
+      {
+        id: 'parcelamento-confiavel-1',
+        modalidade: 'Parcelamento Ordinario',
+        parcelaAtual: 5,
+        quantidadeParcelas: 18,
+        requerAcao: false,
+        situacao: 'EM_DIA'
+      }
+    ];
+
+    await requestJson('/integracoes/acessorias/config', {
+      body: { apiToken: VALID_TOKEN },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+    await requestJson('/integracoes/acessorias/empresas/sync', {
+      cookie: sessionCookie,
+      method: 'POST'
+    });
+
+    const successfulExecution = await requestJson(
+      `/integracoes/acessorias/empresas/${empresaConfiavel.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    const ultimoSucessoEm = String(
+      (successfulExecution.body as {
+        integration?: { ultimoSucessoEm?: string | null };
+      }).integration?.ultimoSucessoEm ?? ''
+    );
+
+    externalParcelamentosPayload = [
+      {
+        modalidade: 'Parcelamento Ordinario',
+        situacao: 'EM_DIA'
+      }
+    ];
+
+    const inconclusiveExecution = await requestJson(
+      `/integracoes/acessorias/empresas/${empresaConfiavel.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(inconclusiveExecution.response.status).toBe(200);
+    expect(inconclusiveExecution.body).toMatchObject({
+      success: false,
+      integration: {
+        statusIntegracao: 'NECESSITA_CONFERENCIA',
+        ultimoSucessoEm
+      }
+    });
+    expect(
+      String((inconclusiveExecution.body as { message?: string }).message ?? '')
+    ).toContain('parcelamentos');
+
+    const [integration, parcelamentos] = await Promise.all([
+      prisma.integracaoEmpresa.findFirstOrThrow({
+        orderBy: {
+          updatedAt: 'desc'
+        },
+        where: {
+          empresaId: empresaConfiavel.id,
+          tipoIntegracao: 'API'
+        }
+      }),
+      prisma.parcelamento.findMany({
+        where: {
+          empresaId: empresaConfiavel.id
+        }
+      })
+    ]);
+
+    expect(integration.statusIntegracao).toBe('NECESSITA_CONFERENCIA');
+    expect(integration.ultimoSucessoEm?.toISOString()).toBe(ultimoSucessoEm);
+    expect(parcelamentos).toHaveLength(1);
+    expect(parcelamentos[0]).toMatchObject({
+      ativo: true,
+      referenciaExterna: 'parcelamento-confiavel-1',
+      situacao: 'EM_DIA'
+    });
   }, TEST_TIMEOUT);
 
   test('mantem o ultimo sucesso quando o retorno externo fica inconclusivo e marca necessita conferencia', async () => {

@@ -79,6 +79,33 @@ export type AcessoriasCompaniesFetchPage = {
   nextCursor: string | null;
 };
 
+export type AcessoriasParcelamentoExternalRaw = {
+  atrasado?: boolean | number | string | null;
+  codigo?: string | null;
+  dataVencimento?: string | null;
+  dataVencimentoRelevante?: string | null;
+  descricao?: string | null;
+  emAtraso?: boolean | number | string | null;
+  id?: string | null;
+  indicioAtraso?: boolean | number | string | null;
+  modalidade?: string | null;
+  numeroParcelaAtual?: number | string | null;
+  parcelaAtual?: number | string | null;
+  parcelamentoId?: string | null;
+  proximoVencimento?: string | null;
+  quantidadeParcelas?: number | string | null;
+  referencia?: string | null;
+  requerAcao?: boolean | number | string | null;
+  situacao?: string | null;
+  status?: string | null;
+  tipo?: string | null;
+  totalParcelas?: number | string | null;
+};
+
+export type AcessoriasParcelamentosFetchResult = {
+  items: AcessoriasParcelamentoExternalRaw[];
+};
+
 export type AcessoriasCompanySyncSummaryView = {
   atualizados: number;
   criados: number;

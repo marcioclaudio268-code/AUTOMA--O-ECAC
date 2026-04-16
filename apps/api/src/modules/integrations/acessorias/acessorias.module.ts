@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { AuthModule } from '../../auth/auth.module';
 import { LogsModule } from '../../logs/logs.module';
+import { ParcelamentosModule } from '../../parcelamentos/parcelamentos.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 
 import { AcessoriasController } from './acessorias.controller';
@@ -20,7 +21,7 @@ import { AcessoriasJobsService } from './services/acessorias-jobs.service';
     AcessoriasJobsService,
     AcessoriasService
   ],
-  imports: [AuthModule, LogsModule, PrismaModule],
+  imports: [AuthModule, LogsModule, ParcelamentosModule, PrismaModule],
   providers: [
     AcessoriasConfigService,
     AcessoriasEmpresasService,
