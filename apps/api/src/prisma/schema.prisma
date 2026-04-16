@@ -40,6 +40,36 @@ enum StatusIntegracao {
   NAO_CONFIGURADA
 }
 
+enum StatusIntegracaoAcessorias {
+  NAO_CONFIGURADA
+  CONFIGURADA
+  ATIVA
+  ERRO
+}
+
+enum TipoAcessoriasSyncJob {
+  TESTE_CONEXAO
+  SINCRONIZACAO_EMPRESAS
+}
+
+enum StatusAcessoriasSyncJob {
+  INICIADO
+  SUCESSO
+  FALHA
+}
+
+enum StatusAcessoriasEmpresaVinculo {
+  NAO_VINCULADA
+  VINCULADA
+  AMBIGUA
+  IGNORADA
+}
+
+enum TipoAcessoriasSyncCursor {
+  GERAL
+  EMPRESAS
+}
+
 enum TipoVarredura {
   MANUAL
 }
@@ -103,7 +133,6 @@ enum ResultadoLogExecucao {
   SEM_ALTERACAO
   FALHA
 }
-
 enum RegimeTributario {
   SIMPLES_NACIONAL
   LUCRO_PRESUMIDO
@@ -172,6 +201,7 @@ model Empresa {
   logsExecucao            LogExecucao[]
   varreduras              Varredura[]
   eventosOperacionais     EventoOperacional[]
+  acessoriasVinculo       AcessoriasEmpresaVinculo?
 
   @@index([responsavelInternoId])
   @@index([naCarteira])
@@ -300,4 +330,61 @@ model LogExecucao {
   @@index([resultado])
   @@index([executadoPorUsuarioInternoId])
   @@index([chaveIdempotencia])
+}
+
+model IntegracaoAcessoriasConfig {
+  id                    String                     @id
+  apiTokenCriptografado String                     @db.Text
+  status                StatusIntegracaoAcessorias @default(NAO_CONFIGURADA)
+  ultimaSincronizacaoEm DateTime?
+  ultimoErroEm          DateTime?
+  mensagemErroAtual     String?                    @db.Text
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+}
+
+model AcessoriasSyncJob {
+  id           String                  @id @default(cuid())
+  tipoJob      TipoAcessoriasSyncJob
+  status       StatusAcessoriasSyncJob @default(INICIADO)
+  iniciadoEm   DateTime
+  finalizadoEm DateTime?
+  processados  Int                     @default(0)
+  criados      Int                     @default(0)
+  atualizados  Int                     @default(0)
+  ignorados    Int                     @default(0)
+  falhas       Int                     @default(0)
+  detalhesErro String?                 @db.Text
+  createdAt    DateTime                @default(now())
+
+  @@index([createdAt])
+}
+
+model AcessoriasSyncCursor {
+  id               String                   @id @default(cuid())
+  tipoCursor       TipoAcessoriasSyncCursor @default(GERAL)
+  valorCursor      String?                   @db.Text
+  ultimaPagina     Int?
+  ultimaExecucaoEm DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@unique([tipoCursor])
+}
+
+model AcessoriasEmpresaVinculo {
+  id                      String                         @id @default(cuid())
+  empresaId               String?                        @unique
+  empresa                 Empresa?                       @relation(fields: [empresaId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  acessoriasEmpresaId     String                         @unique @db.Text
+  nomeExterno             String                         @db.Text
+  cnpjExterno             String                         @db.Text
+  statusVinculo           StatusAcessoriasEmpresaVinculo @default(NAO_VINCULADA)
+  sincronizacaoHabilitada Boolean                        @default(false)
+  matchAutomatico         Boolean                        @default(false)
+  ultimaSincronizacaoEm   DateTime?
+  createdAt               DateTime                       @default(now())
+  updatedAt               DateTime                       @updatedAt
+
+  @@index([statusVinculo])
 }
