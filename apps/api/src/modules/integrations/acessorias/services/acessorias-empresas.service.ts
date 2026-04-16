@@ -61,6 +61,7 @@ const companyIntegrationSelect = {
   observacoes: true,
   statusIntegracao: true,
   tipoIntegracao: true,
+  ultimaExecucaoEm: true,
   updatedAt: true,
   ultimoErroEm: true,
   ultimoSucessoEm: true
@@ -114,6 +115,7 @@ type ExecutionFailureReason =
   | 'SEM_VINCULO'
   | 'VINCULO_INVALIDO'
   | 'EMPRESA_EXTERNA_AUSENTE'
+  | 'RETORNO_INCONCLUSIVO'
   | 'CNPJ_INCONSISTENTE'
   | 'FALHA_CONEXAO';
 
@@ -122,18 +124,22 @@ type ExecutionOutcome =
       details: string;
       externalCompany: NormalizedExternalCompany;
       integrationMessage: string;
+      integrationObservacoes: string;
       logDetails: string;
       logSummary: string;
+      statusIntegracao: 'ATIVA';
       success: true;
     }
   | {
+      actionRequired: boolean;
       details: string;
       integrationMessage: string;
       logDetails: string;
       logSummary: string;
-      pendingDescription: string;
-      pendingTitle: string;
+      pendingDescription: string | null;
+      pendingTitle: string | null;
       reason: ExecutionFailureReason;
+      statusIntegracao: 'ERRO' | 'NECESSITA_CONFERENCIA';
       success: false;
     };
 
@@ -508,7 +514,17 @@ export class AcessoriasEmpresasService {
             'Empresa externa vinculada nao foi encontrada no retorno atual da Acessorias.'
           );
         } else if (
-          normalizeCnpj(externalCompany.cnpjExterno) !== company.cnpj
+          !externalCompany.normalizedCnpj ||
+          !isBasicCnpj(externalCompany.normalizedCnpj)
+        ) {
+          outcome = this.buildExecutionFailureOutcome(
+            'RETORNO_INCONCLUSIVO',
+            company,
+            linkedRecord,
+            'Retorno Acessorias inconclusivo para a empresa vinculada.'
+          );
+        } else if (
+          externalCompany.normalizedCnpj !== company.cnpj
         ) {
           outcome = this.buildExecutionFailureOutcome(
             'CNPJ_INCONSISTENTE',
@@ -553,32 +569,33 @@ export class AcessoriasEmpresasService {
         client,
         company.id,
         finishedAt,
-        outcome.success,
-        outcome.integrationMessage
+        outcome
       );
 
       let pendenciaId: string | null = null;
 
       if (!outcome.success) {
-        const pendencia = await this.createExecutionPendencia(
-          client,
-          company,
-          outcome,
-          finishedAt
-        );
+        if (outcome.actionRequired) {
+          const pendencia = await this.createExecutionPendencia(
+            client,
+            company,
+            outcome,
+            finishedAt
+          );
 
-        pendenciaId = pendencia.id;
+          pendenciaId = pendencia.id;
+        }
 
         const event = await client.eventoOperacional.create({
           data: {
             descricao: outcome.logDetails,
             empresaId: company.id,
             metadata: {
-              actionRequired: true,
+              actionRequired: outcome.actionRequired,
               companyId: company.id,
               companyCnpj: company.cnpj,
               companyName: company.razaoSocial,
-              integrationStatus: 'ERRO',
+              integrationStatus: outcome.statusIntegracao,
               integrationType: 'ACESSORIAS',
               linkedAcessoriasEmpresaId:
                 linkedRecord?.acessoriasEmpresaId ?? null,
@@ -589,12 +606,17 @@ export class AcessoriasEmpresasService {
           }
         });
 
+        const companyEventData: Prisma.EmpresaUpdateInput = {
+          ultimoEventoRelevanteEm: event.createdAt
+        };
+
+        if (pendenciaId) {
+          companyEventData.pendenciaOperacional = true;
+          companyEventData.regularizadaEm = null;
+        }
+
         await client.empresa.update({
-          data: {
-            pendenciaOperacional: true,
-            regularizadaEm: null,
-            ultimoEventoRelevanteEm: event.createdAt
-          },
+          data: companyEventData,
           where: {
             id: company.id
           }
@@ -943,6 +965,11 @@ export class AcessoriasEmpresasService {
     linkedRecord: VinculoRecord,
     externalCompany: NormalizedExternalCompany
   ): ExecutionOutcome {
+    const integrationObservacoes = [
+      `Ultima validacao confiavel Acessorias em ${company.razaoSocial}.`,
+      `Vinculo externo ${linkedRecord.acessoriasEmpresaId} confirmado para o CNPJ ${company.cnpj}.`
+    ].join(' ');
+
     return {
       details: [
         `Empresa interna ${company.razaoSocial} validada com a empresa externa ${externalCompany.nomeExterno}.`,
@@ -950,11 +977,13 @@ export class AcessoriasEmpresasService {
       ].join(' '),
       externalCompany,
       integrationMessage: `Execucao Acessorias concluida com vinculo validado para ${company.razaoSocial}.`,
+      integrationObservacoes,
       logDetails: [
         `Vinculo externo ${externalCompany.acessoriasEmpresaId} localizado.`,
         `CNPJ conferido: ${externalCompany.cnpjExterno ?? 'nao informado'}.`
       ].join(' '),
       logSummary: `Execucao Acessorias concluida: ${company.razaoSocial}`,
+      statusIntegracao: StatusIntegracao.ATIVA,
       success: true
     };
   }
@@ -967,17 +996,23 @@ export class AcessoriasEmpresasService {
   ): ExecutionOutcome {
     const normalizedMessage =
       this.normalizeText(message, 'Falha na execucao Acessorias da empresa.');
-    const pendingTitle = this.buildExecutionPendingTitle(reason);
-    const pendingDescription = [
-      normalizedMessage,
-      `Empresa: ${company.razaoSocial}.`,
-      linkedRecord?.acessoriasEmpresaId
-        ? `Vinculo externo: ${linkedRecord.acessoriasEmpresaId}.`
-        : 'Sem vinculo externo confirmado.',
-      'Revisar o vinculo, o CNPJ e a disponibilidade da origem externa.'
-    ].join(' ');
+    const actionRequired = this.shouldCreateExecutionPendencia(reason);
+    const pendingTitle = actionRequired
+      ? this.buildExecutionPendingTitle(reason)
+      : null;
+    const pendingDescription = actionRequired
+      ? [
+          normalizedMessage,
+          `Empresa: ${company.razaoSocial}.`,
+          linkedRecord?.acessoriasEmpresaId
+            ? `Vinculo externo: ${linkedRecord.acessoriasEmpresaId}.`
+            : 'Sem vinculo externo confirmado.',
+          'Revisar o vinculo, o CNPJ e a disponibilidade da origem externa.'
+        ].join(' ')
+      : null;
 
     return {
+      actionRequired,
       details: normalizedMessage,
       integrationMessage: normalizedMessage,
       logDetails: [
@@ -991,6 +1026,7 @@ export class AcessoriasEmpresasService {
       pendingDescription,
       pendingTitle,
       reason,
+      statusIntegracao: this.resolveExecutionFailureStatus(reason),
       success: false
     };
   }
@@ -1004,12 +1040,37 @@ export class AcessoriasEmpresasService {
         return 'Vincular empresa ao Acessorias';
       case 'EMPRESA_EXTERNA_AUSENTE':
         return 'Sincronizar empresa Acessorias';
+      case 'RETORNO_INCONCLUSIVO':
+        return 'Conferir retorno Acessorias';
       case 'CNPJ_INCONSISTENTE':
         return 'Revisar vinculo Acessorias';
       case 'FALHA_CONEXAO':
       default:
         return 'Verificar acesso Acessorias';
     }
+  }
+
+  private resolveExecutionFailureStatus(
+    reason: ExecutionFailureReason
+  ): 'ERRO' | 'NECESSITA_CONFERENCIA' {
+    switch (reason) {
+      case 'EMPRESA_EXTERNA_AUSENTE':
+      case 'RETORNO_INCONCLUSIVO':
+      case 'FALHA_CONEXAO':
+        return StatusIntegracao.NECESSITA_CONFERENCIA;
+      case 'SEM_CONFIGURACAO':
+      case 'SEM_VINCULO':
+      case 'VINCULO_INVALIDO':
+      case 'CNPJ_INCONSISTENTE':
+      default:
+        return StatusIntegracao.ERRO;
+    }
+  }
+
+  private shouldCreateExecutionPendencia(
+    reason: ExecutionFailureReason
+  ): boolean {
+    return reason !== 'FALHA_CONEXAO';
   }
 
   private async createExecutionPendencia(
@@ -1037,14 +1098,16 @@ export class AcessoriasEmpresasService {
     return await client.pendencia.create({
       data: {
         abertaEm: finishedAt,
-        descricao: outcome.pendingDescription,
+        descricao:
+          outcome.pendingDescription ??
+          'Execucao Acessorias exige conferencia operacional.',
         empresaId: company.id,
         origem: 'ACESSORIAS_EXECUCAO_EMPRESA',
         prioridade: PrioridadePendencia.ALTA,
         responsavelInternoId: company.responsavelInternoId,
         status: StatusPendencia.ABERTA,
         tipo: TipoPendencia.OPERACIONAL,
-        titulo: outcome.pendingTitle
+        titulo: outcome.pendingTitle ?? 'Conferir execucao Acessorias'
       },
       select: {
         id: true
@@ -1056,8 +1119,7 @@ export class AcessoriasEmpresasService {
     client: Prisma.TransactionClient,
     companyId: string,
     finishedAt: Date,
-    success: boolean,
-    message: string
+    outcome: ExecutionOutcome
   ): Promise<CompanyIntegrationRecord> {
     const existing = await client.integracaoEmpresa.findFirst({
       select: companyIntegrationSelect,
@@ -1072,14 +1134,19 @@ export class AcessoriasEmpresasService {
 
     const data = {
       empresaId: companyId,
-      mensagemErroAtual: success ? null : message,
-      observacoes: existing?.observacoes ?? null,
-      statusIntegracao: success
-        ? StatusIntegracao.ATIVA
-        : StatusIntegracao.ERRO,
+      mensagemErroAtual: outcome.success ? null : outcome.integrationMessage,
+      observacoes: outcome.success
+        ? outcome.integrationObservacoes
+        : existing?.observacoes ?? null,
+      statusIntegracao: outcome.statusIntegracao,
       tipoIntegracao: TipoIntegracao.API,
-      ultimoErroEm: success ? null : finishedAt,
-      ultimoSucessoEm: success ? finishedAt : existing?.ultimoSucessoEm ?? null
+      ultimaExecucaoEm: finishedAt,
+      ultimoErroEm: outcome.success
+        ? existing?.ultimoErroEm ?? null
+        : finishedAt,
+      ultimoSucessoEm: outcome.success
+        ? finishedAt
+        : existing?.ultimoSucessoEm ?? null
     };
 
     if (existing) {
@@ -1111,6 +1178,7 @@ export class AcessoriasEmpresasService {
       observacoes: record.observacoes,
       statusIntegracao: record.statusIntegracao,
       tipoIntegracao: record.tipoIntegracao,
+      ultimaExecucaoEm: record.ultimaExecucaoEm?.toISOString() ?? null,
       updatedAt: record.updatedAt.toISOString(),
       ultimoErroEm: record.ultimoErroEm?.toISOString() ?? null,
       ultimoSucessoEm: record.ultimoSucessoEm?.toISOString() ?? null

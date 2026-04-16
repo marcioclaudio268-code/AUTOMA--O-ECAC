@@ -21,7 +21,22 @@ function buildCompany(): CompanyDetailItem {
     certificadoDigitalValidoAte: null,
     createdAt: '2026-04-16T12:00:00.000Z',
     id: 'company-1',
-    integracoes: [],
+    integracoes: [
+      {
+        createdAt: '2026-04-16T11:50:00.000Z',
+        empresaId: 'company-1',
+        id: 'integration-existing-1',
+        mensagemErroAtual: 'Retorno externo anterior exigiu conferencia.',
+        observacoes:
+          'Ultima validacao confiavel Acessorias em Empresa Alfa Ltda.',
+        statusIntegracao: 'NECESSITA_CONFERENCIA',
+        tipoIntegracao: 'API',
+        ultimaExecucaoEm: '2026-04-16T11:59:00.000Z',
+        updatedAt: '2026-04-16T11:59:00.000Z',
+        ultimoErroEm: '2026-04-16T11:59:00.000Z',
+        ultimoSucessoEm: '2026-04-16T11:40:00.000Z'
+      }
+    ],
     naCarteira: true,
     nomeFantasia: 'Empresa Alfa',
     observacoesOperacionais: null,
@@ -178,6 +193,7 @@ beforeEach(() => {
       observacoes: null,
       statusIntegracao: 'ATIVA',
       tipoIntegracao: 'API',
+      ultimaExecucaoEm: '2026-04-16T12:10:00.000Z',
       updatedAt: '2026-04-16T12:10:00.000Z',
       ultimoErroEm: null,
       ultimoSucessoEm: '2026-04-16T12:10:00.000Z'
@@ -228,6 +244,10 @@ test('renderiza a pagina e dispara o loop Acessorias da empresa', async () => {
   });
 
   await waitForText('Executar Acessorias nesta empresa');
+  await waitForText('Necessita conferencia');
+  await waitForText('Ultima execucao');
+  await waitForText('Ultimo sucesso');
+  await waitForText('Ultimo erro');
 
   const button = findButtonByText('Executar Acessorias nesta empresa');
 

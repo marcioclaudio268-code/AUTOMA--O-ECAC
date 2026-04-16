@@ -566,6 +566,224 @@ describe('Acessorias integration', () => {
     expect(pendencias).toHaveLength(0);
   }, TEST_TIMEOUT);
 
+  test('mantem o ultimo sucesso quando o retorno externo fica inconclusivo e marca necessita conferencia', async () => {
+    const empresaConfiavel = await prisma.empresa.create({
+      data: {
+        cnpj: '77777777000103',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Confiavel ECAC',
+        pendenciaOperacional: false,
+        razaoSocial: 'Empresa Confiavel ECAC Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: null,
+        statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
+        statusProcuracao: StatusProcuracaoEmpresa.NAO_VERIFICADA
+      }
+    });
+
+    externalCompaniesPayload = [
+      {
+        cnpj: '77777777000103',
+        id: 'ext-confiavel-1',
+        razaoSocial: 'Empresa Externa Confiavel Ltda'
+      }
+    ];
+    expectedToken = VALID_TOKEN;
+    await requestJson('/integracoes/acessorias/config', {
+      body: { apiToken: VALID_TOKEN },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    await requestJson('/integracoes/acessorias/empresas/sync', {
+      cookie: sessionCookie,
+      method: 'POST'
+    });
+
+    const successfulExecution = await requestJson(
+      `/integracoes/acessorias/empresas/${empresaConfiavel.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(successfulExecution.response.status).toBe(200);
+    expect(successfulExecution.body).toMatchObject({
+      success: true,
+      integration: {
+        statusIntegracao: 'ATIVA'
+      }
+    });
+
+    const ultimoSucessoEm = String(
+      (successfulExecution.body as {
+        integration?: { ultimoSucessoEm?: string | null };
+      }).integration?.ultimoSucessoEm ?? ''
+    );
+
+    externalCompaniesPayload = [
+      {
+        id: 'ext-confiavel-1',
+        razaoSocial: 'Empresa Externa Confiavel Ltda'
+      }
+    ];
+
+    const inconclusiveExecution = await requestJson(
+      `/integracoes/acessorias/empresas/${empresaConfiavel.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(inconclusiveExecution.response.status).toBe(200);
+    expect(inconclusiveExecution.body).toMatchObject({
+      success: false,
+      integration: {
+        statusIntegracao: 'NECESSITA_CONFERENCIA',
+        ultimoSucessoEm
+      },
+      varredura: {
+        statusExecucao: 'FALHA',
+        tipoVarredura: 'ACESSORIAS'
+      }
+    });
+    expect(
+      String((inconclusiveExecution.body as { message?: string }).message ?? '')
+    ).toContain('inconclusivo');
+
+    const integration = await prisma.integracaoEmpresa.findFirstOrThrow({
+      orderBy: {
+        updatedAt: 'desc'
+      },
+      where: {
+        empresaId: empresaConfiavel.id,
+        tipoIntegracao: 'API'
+      }
+    });
+
+    const pendencias = await prisma.pendencia.findMany({
+      where: {
+        empresaId: empresaConfiavel.id,
+        origem: 'ACESSORIAS_EXECUCAO_EMPRESA'
+      }
+    });
+
+    expect(integration.statusIntegracao).toBe('NECESSITA_CONFERENCIA');
+    expect(integration.ultimoSucessoEm?.toISOString()).toBe(ultimoSucessoEm);
+    expect(integration.ultimoErroEm).not.toBeNull();
+    expect(integration.ultimaExecucaoEm).not.toBeNull();
+    expect(pendencias).toHaveLength(1);
+  }, TEST_TIMEOUT);
+
+  test('falha transitória de conexao continua rastreavel sem abrir pendencia automatica', async () => {
+    const empresaConexao = await prisma.empresa.create({
+      data: {
+        cnpj: '88888888000184',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Conexao ECAC',
+        pendenciaOperacional: false,
+        razaoSocial: 'Empresa Conexao ECAC Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: null,
+        statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
+        statusProcuracao: StatusProcuracaoEmpresa.NAO_VERIFICADA
+      }
+    });
+
+    externalCompaniesPayload = [
+      {
+        cnpj: '88888888000184',
+        id: 'ext-conexao-1',
+        razaoSocial: 'Empresa Externa Conexao Ltda'
+      }
+    ];
+    expectedToken = VALID_TOKEN;
+    await requestJson('/integracoes/acessorias/config', {
+      body: { apiToken: VALID_TOKEN },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    await requestJson('/integracoes/acessorias/empresas/sync', {
+      cookie: sessionCookie,
+      method: 'POST'
+    });
+
+    const successfulExecution = await requestJson(
+      `/integracoes/acessorias/empresas/${empresaConexao.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    const ultimoSucessoEm = String(
+      (successfulExecution.body as {
+        integration?: { ultimoSucessoEm?: string | null };
+      }).integration?.ultimoSucessoEm ?? ''
+    );
+
+    const originalCompaniesUrl = process.env.ACESSORIAS_EMPRESAS_URL;
+
+    try {
+      process.env.ACESSORIAS_EMPRESAS_URL = 'http://127.0.0.1:1/companies';
+
+      const failedExecution = await requestJson(
+        `/integracoes/acessorias/empresas/${empresaConexao.id}/execute`,
+        {
+          cookie: sessionCookie,
+          method: 'POST'
+        }
+      );
+
+      expect(failedExecution.response.status).toBe(200);
+      expect(failedExecution.body).toMatchObject({
+        success: false,
+        integration: {
+          statusIntegracao: 'NECESSITA_CONFERENCIA',
+          ultimoSucessoEm
+        },
+        varredura: {
+          statusExecucao: 'FALHA',
+          tipoVarredura: 'ACESSORIAS'
+        }
+      });
+
+      const [integration, pendencias, eventos] = await Promise.all([
+        prisma.integracaoEmpresa.findFirstOrThrow({
+          orderBy: {
+            updatedAt: 'desc'
+          },
+          where: {
+            empresaId: empresaConexao.id,
+            tipoIntegracao: 'API'
+          }
+        }),
+        prisma.pendencia.findMany({
+          where: {
+            empresaId: empresaConexao.id,
+            origem: 'ACESSORIAS_EXECUCAO_EMPRESA'
+          }
+        }),
+        prisma.eventoOperacional.findMany({
+          where: {
+            empresaId: empresaConexao.id
+          }
+        })
+      ]);
+
+      expect(integration.statusIntegracao).toBe('NECESSITA_CONFERENCIA');
+      expect(integration.ultimoSucessoEm?.toISOString()).toBe(ultimoSucessoEm);
+      expect(integration.ultimoErroEm).not.toBeNull();
+      expect(pendencias).toHaveLength(0);
+      expect(eventos.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      process.env.ACESSORIAS_EMPRESAS_URL = originalCompaniesUrl;
+    }
+  }, TEST_TIMEOUT);
+
   test('gera falha rastreavel, evento e pendencia quando a empresa nao possui vinculo valido', async () => {
     const empresaSemVinculo = await prisma.empresa.create({
       data: {

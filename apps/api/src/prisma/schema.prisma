@@ -37,6 +37,7 @@ enum StatusIntegracao {
   ATIVA
   INATIVA
   ERRO
+  NECESSITA_CONFERENCIA
   NAO_CONFIGURADA
 }
 
@@ -215,6 +216,7 @@ model IntegracaoEmpresa {
   empresa           Empresa         @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   tipoIntegracao    TipoIntegracao
   statusIntegracao  StatusIntegracao
+  ultimaExecucaoEm  DateTime?
   ultimoSucessoEm   DateTime?
   ultimoErroEm      DateTime?
   mensagemErroAtual String?         @db.Text

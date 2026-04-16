@@ -448,6 +448,8 @@ function getIntegrationTone(
   switch (status) {
     case 'ATIVA':
       return 'success';
+    case 'NECESSITA_CONFERENCIA':
+      return 'warning';
     case 'ERRO':
       return 'danger';
     case 'INATIVA':
@@ -455,6 +457,37 @@ function getIntegrationTone(
     case 'NAO_CONFIGURADA':
     default:
       return 'neutral';
+  }
+}
+
+function formatIntegrationStatusLabel(
+  status: CompanyIntegration['statusIntegracao']
+) {
+  switch (status) {
+    case 'ATIVA':
+      return 'Ativa';
+    case 'ERRO':
+      return 'Erro';
+    case 'INATIVA':
+      return 'Inativa';
+    case 'NECESSITA_CONFERENCIA':
+      return 'Necessita conferencia';
+    case 'NAO_CONFIGURADA':
+    default:
+      return 'Nao configurada';
+  }
+}
+
+function getIntegrationMessageClasses(
+  status: CompanyIntegration['statusIntegracao']
+) {
+  switch (status) {
+    case 'NECESSITA_CONFERENCIA':
+      return 'border-amber-200 bg-amber-50 text-amber-800';
+    case 'ERRO':
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-700';
   }
 }
 
@@ -1796,7 +1829,10 @@ export default function CompanyDetailPage() {
                               {integration.tipoIntegracao}
                             </p>
                             <p className="text-xs text-slate-500">
-                              Atualizado em {formatDateTime(integration.updatedAt)}
+                              Ultima execucao{' '}
+                              {formatDateTime(
+                                integration.ultimaExecucaoEm ?? integration.updatedAt
+                              )}
                             </p>
                           </div>
                           <span
@@ -1804,7 +1840,9 @@ export default function CompanyDetailPage() {
                               getIntegrationTone(integration.statusIntegracao)
                             )}`}
                           >
-                            {integration.statusIntegracao}
+                            {formatIntegrationStatusLabel(
+                              integration.statusIntegracao
+                            )}
                           </span>
                         </div>
                         {integration.observacoes ? (
@@ -1813,21 +1851,41 @@ export default function CompanyDetailPage() {
                           </p>
                         ) : null}
                         {integration.mensagemErroAtual ? (
-                          <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                          <p
+                            className={`mt-3 rounded-xl border px-3 py-2 text-sm ${getIntegrationMessageClasses(
+                              integration.statusIntegracao
+                            )}`}
+                          >
                             {integration.mensagemErroAtual}
                           </p>
                         ) : null}
-                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
-                          {integration.ultimoSucessoEm ? (
-                            <span>
-                              Ultimo sucesso {formatDateTime(integration.ultimoSucessoEm)}
-                            </span>
-                          ) : null}
-                          {integration.ultimoErroEm ? (
-                            <span>
-                              Ultimo erro {formatDateTime(integration.ultimoErroEm)}
-                            </span>
-                          ) : null}
+                        <div className="mt-3 grid gap-3 text-xs text-slate-500 sm:grid-cols-3">
+                          <div className="space-y-1">
+                            <dt className="uppercase tracking-[0.18em] text-slate-500">
+                              Ultima execucao
+                            </dt>
+                            <dd className="text-sm font-medium text-slate-900">
+                              {formatDateTime(
+                                integration.ultimaExecucaoEm ?? integration.updatedAt
+                              )}
+                            </dd>
+                          </div>
+                          <div className="space-y-1">
+                            <dt className="uppercase tracking-[0.18em] text-slate-500">
+                              Ultimo sucesso
+                            </dt>
+                            <dd className="text-sm font-medium text-slate-900">
+                              {formatDateTime(integration.ultimoSucessoEm)}
+                            </dd>
+                          </div>
+                          <div className="space-y-1">
+                            <dt className="uppercase tracking-[0.18em] text-slate-500">
+                              Ultimo erro
+                            </dt>
+                            <dd className="text-sm font-medium text-slate-900">
+                              {formatDateTime(integration.ultimoErroEm)}
+                            </dd>
+                          </div>
                         </div>
                       </li>
                     ))}

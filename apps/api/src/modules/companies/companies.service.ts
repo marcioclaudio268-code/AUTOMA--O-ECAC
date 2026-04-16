@@ -59,6 +59,7 @@ type CompanyDetailIntegrationRow = {
   observacoes: string | null;
   statusIntegracao: string;
   tipoIntegracao: string;
+  ultimaExecucaoEm: Date | null;
   updatedAt: Date;
   ultimoErroEm: Date | null;
   ultimoSucessoEm: Date | null;
@@ -628,6 +629,7 @@ export class CompaniesService {
         "observacoes",
         "statusIntegracao"::text AS "statusIntegracao",
         "tipoIntegracao"::text AS "tipoIntegracao",
+        "ultimaExecucaoEm",
         "updatedAt",
         "ultimoErroEm",
         "ultimoSucessoEm"
