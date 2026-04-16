@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import Link from 'next/link';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -7,6 +8,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { requireSession, signOut } from '@/lib/auth';
 import {
   executeManualScan,
+  executeAcessoriasCompanyLoop,
   createCompanyPendencia,
   getCompany,
   getCompanyOperationalHistory,
@@ -76,6 +78,7 @@ type CompanyFormState = {
 
 type OperationalQuickAction =
   | 'executarVarreduraManual'
+  | 'executarAcessoriasIntegracao'
   | 'registrarConferencia'
   | 'registrarRevisaoOperacional'
   | 'marcarAcessoDisponivel'
@@ -244,6 +247,16 @@ function formatScanStatusLabel(value: VarreduraRecord['statusExecucao']) {
     case 'INICIADA':
     default:
       return 'Iniciada';
+  }
+}
+
+function formatScanTypeLabel(value: VarreduraRecord['tipoVarredura']) {
+  switch (value) {
+    case 'ACESSORIAS':
+      return 'Acessorias';
+    case 'MANUAL':
+    default:
+      return 'Manual';
   }
 }
 
@@ -718,6 +731,50 @@ export default function CompanyDetailPage() {
     );
   }
 
+  async function handleAcessoriasExecution() {
+    if (!companyId) {
+      setError('Empresa invalida.');
+      return;
+    }
+
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
+    setIsSaving(true);
+    setActiveQuickAction('executarAcessoriasIntegracao');
+    setError('');
+    setMessage('');
+    setFlashMessage('');
+
+    try {
+      const result = await executeAcessoriasCompanyLoop(companyId);
+
+      try {
+        await refreshOperationalData();
+      } catch {
+        // Refresh best effort; the execution already persisted its own trace.
+      }
+
+      if (result.success) {
+        setMessage(result.message);
+      } else {
+        setError(result.message);
+      }
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Falha ao executar integracao Acessorias.'
+      );
+    } finally {
+      submitLockRef.current = false;
+      setIsSaving(false);
+      setActiveQuickAction(null);
+    }
+  }
+
   async function handleQuickAction(action: OperationalQuickAction) {
     if (!companyId) {
       setError('Empresa invalida.');
@@ -732,6 +789,9 @@ export default function CompanyDetailPage() {
     }
 
     switch (action) {
+      case 'executarAcessoriasIntegracao':
+        await handleAcessoriasExecution();
+        break;
       case 'registrarConferencia':
         await runOperationalAction(
           action,
@@ -1773,6 +1833,30 @@ export default function CompanyDetailPage() {
                     ))}
                   </ul>
                 )}
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Execucao Acessorias da empresa
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Dispara o primeiro loop operacional desta empresa contra a
+                      integracao Acessorias, com trilha rastreavel.
+                    </p>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button
+                      className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      aria-busy={isSaving}
+                      disabled={isSaving}
+                      onClick={() => void handleQuickAction('executarAcessoriasIntegracao')}
+                      type="button"
+                    >
+                      {activeQuickAction === 'executarAcessoriasIntegracao'
+                        ? 'Executando Acessorias...'
+                        : 'Executar Acessorias nesta empresa'}
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -1782,7 +1866,7 @@ export default function CompanyDetailPage() {
                       Varreduras recentes
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Ultimas execucoes manuais registradas para a empresa.
+                      Ultimas execucoes registradas para a empresa.
                     </p>
                   </div>
                   <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
@@ -1803,7 +1887,8 @@ export default function CompanyDetailPage() {
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div className="space-y-1">
                             <p className="text-sm font-semibold text-slate-900">
-                              Varredura {formatScanStatusLabel(scan.statusExecucao)}
+                              Varredura {formatScanTypeLabel(scan.tipoVarredura)} -{' '}
+                              {formatScanStatusLabel(scan.statusExecucao)}
                             </p>
                             <p className="text-xs text-slate-500">
                               Iniciada em {formatDateTime(scan.iniciadoEm)}

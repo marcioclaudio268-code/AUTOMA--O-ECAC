@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 
 import {
+  executeAcessoriasCompanyLoop,
   registerCompanyCheck,
   registerCompanyOperationalReview
 } from './index';
@@ -64,6 +65,56 @@ test('registerCompanyOperationalReview chama o endpoint certo e retorna o timest
       body: JSON.stringify({
         chaveIdempotencia: 'review-1'
       }),
+      method: 'POST'
+    })
+  );
+});
+
+test('executeAcessoriasCompanyLoop chama o endpoint certo da execucao controlada', async () => {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    text: async () =>
+      JSON.stringify({
+        integration: {
+          createdAt: '2026-04-14T12:00:00.000Z',
+          empresaId: 'empresa-123',
+          id: 'integracao-1',
+          mensagemErroAtual: null,
+          observacoes: null,
+          statusIntegracao: 'ATIVA',
+          tipoIntegracao: 'API',
+          updatedAt: '2026-04-14T12:00:00.000Z',
+          ultimoErroEm: null,
+          ultimoSucessoEm: '2026-04-14T12:00:00.000Z'
+        },
+        message: 'Execucao Acessorias concluida.',
+        success: true,
+        varredura: {
+          createdAt: '2026-04-14T12:00:00.000Z',
+          empresaId: 'empresa-123',
+          finalizadoEm: '2026-04-14T12:00:00.000Z',
+          id: 'varredura-1',
+          iniciadoEm: '2026-04-14T12:00:00.000Z',
+          resumoResultado: 'Execucao Acessorias concluida.',
+          statusExecucao: 'CONCLUIDA',
+          tipoVarredura: 'ACESSORIAS',
+          updatedAt: '2026-04-14T12:00:00.000Z'
+        }
+      })
+  } as Response);
+
+  vi.stubGlobal('fetch', fetchMock);
+
+  const result = await executeAcessoriasCompanyLoop('empresa-123');
+
+  expect(result).toMatchObject({
+    message: 'Execucao Acessorias concluida.',
+    success: true
+  });
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining('/integracoes/acessorias/empresas/empresa-123/execute'),
+    expect.objectContaining({
       method: 'POST'
     })
   );

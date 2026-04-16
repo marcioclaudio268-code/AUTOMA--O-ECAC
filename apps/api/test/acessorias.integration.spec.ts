@@ -459,8 +459,210 @@ describe('Acessorias integration', () => {
     expect((linkedOnly.body as Array<{ empresaId: string | null }>)).toHaveLength(1);
   }, TEST_TIMEOUT);
 
+  test('executa o loop por empresa, atualiza status e permite reprocessamento manual', async () => {
+    const empresaLoop = await prisma.empresa.create({
+      data: {
+        cnpj: '55555555000101',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Loop ECAC',
+        pendenciaOperacional: false,
+        razaoSocial: 'Empresa Loop ECAC Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: null,
+        statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
+        statusProcuracao: StatusProcuracaoEmpresa.NAO_VERIFICADA
+      }
+    });
+
+    externalCompaniesPayload = [
+      {
+        cnpj: '55555555000101',
+        id: 'ext-loop-1',
+        razaoSocial: 'Empresa Externa Loop Ltda'
+      }
+    ];
+    expectedToken = VALID_TOKEN;
+    await requestJson('/integracoes/acessorias/config', {
+      body: { apiToken: VALID_TOKEN },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    await requestJson('/integracoes/acessorias/empresas/sync', {
+      cookie: sessionCookie,
+      method: 'POST'
+    });
+
+    const firstExecution = await requestJson(
+      `/integracoes/acessorias/empresas/${empresaLoop.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(firstExecution.response.status).toBe(200);
+    expect(firstExecution.body).toMatchObject({
+      success: true,
+      integration: {
+        statusIntegracao: 'ATIVA'
+      },
+      varredura: {
+        statusExecucao: 'CONCLUIDA',
+        tipoVarredura: 'ACESSORIAS'
+      }
+    });
+
+    const secondExecution = await requestJson(
+      `/integracoes/acessorias/empresas/${empresaLoop.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(secondExecution.response.status).toBe(200);
+    expect(secondExecution.body).toMatchObject({
+      success: true,
+      integration: {
+        statusIntegracao: 'ATIVA'
+      },
+      varredura: {
+        statusExecucao: 'CONCLUIDA',
+        tipoVarredura: 'ACESSORIAS'
+      }
+    });
+
+    const varreduras = await prisma.varredura.findMany({
+      orderBy: {
+        iniciadoEm: 'asc'
+      },
+      where: {
+        empresaId: empresaLoop.id,
+        tipoVarredura: 'ACESSORIAS'
+      }
+    });
+
+    expect(varreduras).toHaveLength(2);
+
+    const logs = await prisma.logExecucao.findMany({
+      orderBy: {
+        executadoEm: 'asc'
+      },
+      where: {
+        empresaId: empresaLoop.id
+      }
+    });
+
+    expect(logs).toHaveLength(2);
+    expect(logs.every((log) => log.tipo === 'REVISAO_OPERACIONAL')).toBe(true);
+
+    const pendencias = await prisma.pendencia.findMany({
+      where: {
+        empresaId: empresaLoop.id
+      }
+    });
+
+    expect(pendencias).toHaveLength(0);
+  }, TEST_TIMEOUT);
+
+  test('gera falha rastreavel, evento e pendencia quando a empresa nao possui vinculo valido', async () => {
+    const empresaSemVinculo = await prisma.empresa.create({
+      data: {
+        cnpj: '66666666000102',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Sem Vinculo',
+        pendenciaOperacional: false,
+        razaoSocial: 'Empresa Sem Vinculo ECAC Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: null,
+        statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
+        statusProcuracao: StatusProcuracaoEmpresa.NAO_VERIFICADA
+      }
+    });
+
+    externalCompaniesPayload = [
+      {
+        cnpj: '77777777000103',
+        id: 'ext-other-1',
+        razaoSocial: 'Empresa Externa Diferente Ltda'
+      }
+    ];
+    expectedToken = VALID_TOKEN;
+    await requestJson('/integracoes/acessorias/config', {
+      body: { apiToken: VALID_TOKEN },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    const failedExecution = await requestJson(
+      `/integracoes/acessorias/empresas/${empresaSemVinculo.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(failedExecution.response.status).toBe(200);
+    expect(failedExecution.body).toMatchObject({
+      success: false,
+      integration: {
+        statusIntegracao: 'ERRO'
+      },
+      varredura: {
+        statusExecucao: 'FALHA',
+        tipoVarredura: 'ACESSORIAS'
+      }
+    });
+    expect(String((failedExecution.body as { message?: string }).message ?? '')).toContain(
+      'vinculo'
+    );
+
+    const varredura = await prisma.varredura.findFirstOrThrow({
+      orderBy: {
+        createdAt: 'desc'
+      },
+      where: {
+        empresaId: empresaSemVinculo.id,
+        tipoVarredura: 'ACESSORIAS'
+      }
+    });
+
+    const evento = await prisma.eventoOperacional.findFirstOrThrow({
+      where: {
+        empresaId: empresaSemVinculo.id,
+        varreduraId: varredura.id
+      }
+    });
+
+    const pendencia = await prisma.pendencia.findFirstOrThrow({
+      where: {
+        empresaId: empresaSemVinculo.id,
+        origem: 'ACESSORIAS_EXECUCAO_EMPRESA'
+      }
+    });
+
+    const integration = await prisma.integracaoEmpresa.findFirstOrThrow({
+      orderBy: {
+        updatedAt: 'desc'
+      },
+      where: {
+        empresaId: empresaSemVinculo.id,
+        tipoIntegracao: 'API'
+      }
+    });
+
+    expect(evento.varreduraId).toBe(varredura.id);
+    expect(pendencia.status).toBe('ABERTA');
+    expect(pendencia.tipo).toBe('OPERACIONAL');
+    expect(integration.statusIntegracao).toBe('ERRO');
+    expect(integration.mensagemErroAtual).toContain('vinculo');
+    expect(integration.ultimoErroEm).not.toBeNull();
+    expect(varredura.resumoResultado).toContain('Empresa nao possui vinculo');
+  }, TEST_TIMEOUT);
+
   test('lista jobs recentes em ordem decrescente', async () => {
-    const response = await requestJson('/integracoes/acessorias/jobs?take=3', {
+    const response = await requestJson('/integracoes/acessorias/jobs?take=10', {
       cookie: sessionCookie
     });
 

@@ -8,9 +8,11 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards
 } from '@nestjs/common';
 
+import type { AuthenticatedRequest } from '../../auth/auth.types';
 import { JwtCookieAuthGuard } from '../../auth/guards/jwt-cookie-auth.guard';
 
 import { UpsertAcessoriasConfigDto } from './dto/upsert-acessorias-config.dto';
@@ -78,5 +80,17 @@ export class AcessoriasController {
   @HttpCode(200)
   unlinkCompany(@Param('empresaId') empresaId: string) {
     return this.acessoriasService.unlinkCompany(empresaId);
+  }
+
+  @Post('empresas/:empresaId/execute')
+  @HttpCode(200)
+  executeCompany(
+    @Param('empresaId') empresaId: string,
+    @Req() request: AuthenticatedRequest
+  ) {
+    return this.acessoriasService.executeCompany(
+      empresaId,
+      request.user?.id
+    );
   }
 }

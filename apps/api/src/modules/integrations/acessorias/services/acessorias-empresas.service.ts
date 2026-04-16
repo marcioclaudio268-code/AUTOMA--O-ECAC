@@ -5,12 +5,23 @@ import {
 } from '@nestjs/common';
 import {
   Prisma,
+  PrioridadePendencia,
+  ResultadoLogExecucao,
   StatusAcessoriasEmpresaVinculo,
-  StatusIntegracaoAcessorias
+  StatusExecucaoVarredura,
+  StatusIntegracao,
+  StatusIntegracaoAcessorias,
+  StatusPendencia,
+  TipoEventoOperacional,
+  TipoIntegracao,
+  TipoLogExecucao,
+  TipoPendencia,
+  TipoVarredura
 } from '@prisma/client';
 
 import { isBasicCnpj, normalizeCnpj } from '../../../../common/utils/cnpj';
 import { PrismaService } from '../../../../prisma/prisma.service';
+import { LogsService } from '../../../logs/logs.service';
 
 import { AcessoriasConfigService } from './acessorias-config.service';
 import { AcessoriasConnectorService } from './acessorias-connector.service';
@@ -19,6 +30,9 @@ import type {
   AcessoriasCompanyExternalRaw,
   AcessoriasCompanyLinkInput,
   AcessoriasCompanyLinkView,
+  AcessoriasCompanyExecutionIntegrationView,
+  AcessoriasCompanyExecutionResponse,
+  AcessoriasCompanyExecutionVarreduraView,
   AcessoriasCompanySummaryView,
   AcessoriasCompanySyncResponse,
   AcessoriasCompanySyncSummaryView
@@ -31,6 +45,27 @@ const companySummarySelect = {
   razaoSocial: true
 } as const;
 
+const companyExecutionSelect = {
+  cnpj: true,
+  id: true,
+  nomeFantasia: true,
+  razaoSocial: true,
+  responsavelInternoId: true
+} as const;
+
+const companyIntegrationSelect = {
+  createdAt: true,
+  empresaId: true,
+  id: true,
+  mensagemErroAtual: true,
+  observacoes: true,
+  statusIntegracao: true,
+  tipoIntegracao: true,
+  updatedAt: true,
+  ultimoErroEm: true,
+  ultimoSucessoEm: true
+} as const;
+
 const vinculoInclude = {
   empresa: {
     select: companySummarySelect
@@ -39,6 +74,14 @@ const vinculoInclude = {
 
 type CompanySummaryRecord = Prisma.EmpresaGetPayload<{
   select: typeof companySummarySelect;
+}>;
+
+type CompanyExecutionRecord = Prisma.EmpresaGetPayload<{
+  select: typeof companyExecutionSelect;
+}>;
+
+type CompanyIntegrationRecord = Prisma.IntegracaoEmpresaGetPayload<{
+  select: typeof companyIntegrationSelect;
 }>;
 
 type VinculoRecord = Prisma.AcessoriasEmpresaVinculoGetPayload<{
@@ -66,6 +109,34 @@ type LoadedCompanies = {
   lastCursor: string | null;
 };
 
+type ExecutionFailureReason =
+  | 'SEM_CONFIGURACAO'
+  | 'SEM_VINCULO'
+  | 'VINCULO_INVALIDO'
+  | 'EMPRESA_EXTERNA_AUSENTE'
+  | 'CNPJ_INCONSISTENTE'
+  | 'FALHA_CONEXAO';
+
+type ExecutionOutcome =
+  | {
+      details: string;
+      externalCompany: NormalizedExternalCompany;
+      integrationMessage: string;
+      logDetails: string;
+      logSummary: string;
+      success: true;
+    }
+  | {
+      details: string;
+      integrationMessage: string;
+      logDetails: string;
+      logSummary: string;
+      pendingDescription: string;
+      pendingTitle: string;
+      reason: ExecutionFailureReason;
+      success: false;
+    };
+
 const MAX_COMPANY_PAGES = 25;
 
 @Injectable()
@@ -74,6 +145,7 @@ export class AcessoriasEmpresasService {
     private readonly configService: AcessoriasConfigService,
     private readonly connectorService: AcessoriasConnectorService,
     private readonly jobsService: AcessoriasJobsService,
+    private readonly logsService: LogsService,
     private readonly prisma: PrismaService
   ) {}
 
@@ -367,6 +439,199 @@ export class AcessoriasEmpresasService {
     return this.mapRecord(updated);
   }
 
+  async executeCompany(
+    empresaId: string,
+    executadoPorUsuarioInternoId?: string | null
+  ): Promise<AcessoriasCompanyExecutionResponse> {
+    const company = await this.prisma.empresa.findUnique({
+      select: companyExecutionSelect,
+      where: {
+        id: empresaId
+      }
+    });
+
+    if (!company) {
+      throw new NotFoundException('Empresa interna nao encontrada.');
+    }
+
+    const linkedRecord = await this.prisma.acessoriasEmpresaVinculo.findFirst({
+      include: vinculoInclude,
+      orderBy: {
+        updatedAt: 'desc'
+      },
+      where: {
+        empresaId
+      }
+    });
+
+    const startedAt = new Date();
+    let outcome: ExecutionOutcome;
+
+    try {
+      const token = await this.configService.loadApiToken();
+
+      if (!token) {
+        outcome = this.buildExecutionFailureOutcome(
+          'SEM_CONFIGURACAO',
+          company,
+          linkedRecord,
+          'Configuracao Acessorias nao encontrada ou token nao informado.'
+        );
+      } else if (!linkedRecord || !linkedRecord.empresaId) {
+        outcome = this.buildExecutionFailureOutcome(
+          'SEM_VINCULO',
+          company,
+          linkedRecord,
+          'Empresa nao possui vinculo Acessorias valido.'
+        );
+      } else if (
+        linkedRecord.statusVinculo !== 'VINCULADA' ||
+        !linkedRecord.sincronizacaoHabilitada
+      ) {
+        outcome = this.buildExecutionFailureOutcome(
+          'VINCULO_INVALIDO',
+          company,
+          linkedRecord,
+          'Empresa nao possui vinculo Acessorias valido.'
+        );
+      } else {
+        const externalCompany = await this.findExternalCompanyById(
+          token,
+          linkedRecord.acessoriasEmpresaId
+        );
+
+        if (!externalCompany) {
+          outcome = this.buildExecutionFailureOutcome(
+            'EMPRESA_EXTERNA_AUSENTE',
+            company,
+            linkedRecord,
+            'Empresa externa vinculada nao foi encontrada no retorno atual da Acessorias.'
+          );
+        } else if (
+          normalizeCnpj(externalCompany.cnpjExterno) !== company.cnpj
+        ) {
+          outcome = this.buildExecutionFailureOutcome(
+            'CNPJ_INCONSISTENTE',
+            company,
+            linkedRecord,
+            'Vinculo Acessorias inconsistente com o CNPJ da empresa.'
+          );
+        } else {
+          outcome = this.buildExecutionSuccessOutcome(
+            company,
+            linkedRecord,
+            externalCompany
+          );
+        }
+      }
+    } catch (error) {
+      outcome = this.buildExecutionFailureOutcome(
+        'FALHA_CONEXAO',
+        company,
+        linkedRecord,
+        this.normalizeErrorMessage(error)
+      );
+    }
+
+    const finishedAt = new Date();
+
+    return this.prisma.$transaction(async (client) => {
+      const varredura = await client.varredura.create({
+        data: {
+          empresaId: company.id,
+          finalizadoEm: finishedAt,
+          iniciadoEm: startedAt,
+          resumoResultado: outcome.details,
+          statusExecucao: outcome.success
+            ? StatusExecucaoVarredura.CONCLUIDA
+            : StatusExecucaoVarredura.FALHA,
+          tipoVarredura: TipoVarredura.ACESSORIAS
+        }
+      });
+
+      const integration = await this.upsertCompanyIntegrationState(
+        client,
+        company.id,
+        finishedAt,
+        outcome.success,
+        outcome.integrationMessage
+      );
+
+      let pendenciaId: string | null = null;
+
+      if (!outcome.success) {
+        const pendencia = await this.createExecutionPendencia(
+          client,
+          company,
+          outcome,
+          finishedAt
+        );
+
+        pendenciaId = pendencia.id;
+
+        const event = await client.eventoOperacional.create({
+          data: {
+            descricao: outcome.logDetails,
+            empresaId: company.id,
+            metadata: {
+              actionRequired: true,
+              companyId: company.id,
+              companyCnpj: company.cnpj,
+              companyName: company.razaoSocial,
+              integrationStatus: 'ERRO',
+              integrationType: 'ACESSORIAS',
+              linkedAcessoriasEmpresaId:
+                linkedRecord?.acessoriasEmpresaId ?? null,
+              reason: outcome.reason
+            },
+            tipoEvento: TipoEventoOperacional.VARREDURA_RELEVANTE,
+            varreduraId: varredura.id
+          }
+        });
+
+        await client.empresa.update({
+          data: {
+            pendenciaOperacional: true,
+            regularizadaEm: null,
+            ultimoEventoRelevanteEm: event.createdAt
+          },
+          where: {
+            id: company.id
+          }
+        });
+      }
+
+      await client.empresa.update({
+        data: {
+          ultimaVarreduraEm: finishedAt
+        },
+        where: {
+          id: company.id
+        }
+      });
+
+      await this.logsService.recordExecution(client, {
+        empresaId: company.id,
+        executadoEm: finishedAt,
+        executadoPorUsuarioInternoId,
+        pendenciaId,
+        resultado: outcome.success
+          ? ResultadoLogExecucao.SUCESSO
+          : ResultadoLogExecucao.FALHA,
+        resumo: outcome.logSummary,
+        detalhes: outcome.logDetails,
+        tipo: TipoLogExecucao.REVISAO_OPERACIONAL
+      });
+
+      return {
+        integration: this.mapIntegrationRecord(integration),
+        message: outcome.integrationMessage,
+        success: outcome.success,
+        varredura: this.mapExecutionVarredura(varredura)
+      };
+    });
+  }
+
   private async finishSyncWithFailure(
     jobId: string,
     syncAt: Date,
@@ -642,6 +907,239 @@ export class AcessoriasEmpresasService {
       sincronizacaoHabilitada: state.sincronizacaoHabilitada,
       statusVinculo: state.statusVinculo,
       ultimaSincronizacaoEm: new Date()
+    };
+  }
+
+  private async findExternalCompanyById(
+    token: string,
+    externalId: string
+  ): Promise<NormalizedExternalCompany | null> {
+    let cursor: string | null = null;
+
+    for (let page = 0; page < MAX_COMPANY_PAGES; page += 1) {
+      const response = await this.connectorService.fetchCompanies(token, cursor);
+      const match = response.items
+        .map((item) => this.normalizeExternalCompany(item))
+        .find((item) => item?.acessoriasEmpresaId === externalId);
+
+      if (match) {
+        return match;
+      }
+
+      const nextCursor = response.nextCursor ?? null;
+
+      if (!nextCursor) {
+        break;
+      }
+
+      cursor = nextCursor;
+    }
+
+    return null;
+  }
+
+  private buildExecutionSuccessOutcome(
+    company: CompanyExecutionRecord,
+    linkedRecord: VinculoRecord,
+    externalCompany: NormalizedExternalCompany
+  ): ExecutionOutcome {
+    return {
+      details: [
+        `Empresa interna ${company.razaoSocial} validada com a empresa externa ${externalCompany.nomeExterno}.`,
+        `Vinculo Acessorias ${linkedRecord.acessoriasEmpresaId} confirmado para o CNPJ ${company.cnpj}.`
+      ].join(' '),
+      externalCompany,
+      integrationMessage: `Execucao Acessorias concluida com vinculo validado para ${company.razaoSocial}.`,
+      logDetails: [
+        `Vinculo externo ${externalCompany.acessoriasEmpresaId} localizado.`,
+        `CNPJ conferido: ${externalCompany.cnpjExterno ?? 'nao informado'}.`
+      ].join(' '),
+      logSummary: `Execucao Acessorias concluida: ${company.razaoSocial}`,
+      success: true
+    };
+  }
+
+  private buildExecutionFailureOutcome(
+    reason: ExecutionFailureReason,
+    company: CompanyExecutionRecord,
+    linkedRecord: VinculoRecord | null,
+    message: string
+  ): ExecutionOutcome {
+    const normalizedMessage =
+      this.normalizeText(message, 'Falha na execucao Acessorias da empresa.');
+    const pendingTitle = this.buildExecutionPendingTitle(reason);
+    const pendingDescription = [
+      normalizedMessage,
+      `Empresa: ${company.razaoSocial}.`,
+      linkedRecord?.acessoriasEmpresaId
+        ? `Vinculo externo: ${linkedRecord.acessoriasEmpresaId}.`
+        : 'Sem vinculo externo confirmado.',
+      'Revisar o vinculo, o CNPJ e a disponibilidade da origem externa.'
+    ].join(' ');
+
+    return {
+      details: normalizedMessage,
+      integrationMessage: normalizedMessage,
+      logDetails: [
+        normalizedMessage,
+        `Motivo tecnico: ${reason}.`,
+        linkedRecord?.acessoriasEmpresaId
+          ? `Vinculo Acessorias ${linkedRecord.acessoriasEmpresaId}.`
+          : 'Nenhum vinculo Acessorias valido localizado.'
+      ].join(' '),
+      logSummary: `Execucao Acessorias com falha: ${company.razaoSocial}`,
+      pendingDescription,
+      pendingTitle,
+      reason,
+      success: false
+    };
+  }
+
+  private buildExecutionPendingTitle(reason: ExecutionFailureReason): string {
+    switch (reason) {
+      case 'SEM_CONFIGURACAO':
+        return 'Configurar Acessorias para a empresa';
+      case 'SEM_VINCULO':
+      case 'VINCULO_INVALIDO':
+        return 'Vincular empresa ao Acessorias';
+      case 'EMPRESA_EXTERNA_AUSENTE':
+        return 'Sincronizar empresa Acessorias';
+      case 'CNPJ_INCONSISTENTE':
+        return 'Revisar vinculo Acessorias';
+      case 'FALHA_CONEXAO':
+      default:
+        return 'Verificar acesso Acessorias';
+    }
+  }
+
+  private async createExecutionPendencia(
+    client: Prisma.TransactionClient,
+    company: CompanyExecutionRecord,
+    outcome: Extract<ExecutionOutcome, { success: false }>,
+    finishedAt: Date
+  ): Promise<{ id: string }> {
+    const existing = await client.pendencia.findFirst({
+      select: {
+        id: true
+      },
+      where: {
+        empresaId: company.id,
+        origem: 'ACESSORIAS_EXECUCAO_EMPRESA',
+        status: StatusPendencia.ABERTA,
+        tipo: TipoPendencia.OPERACIONAL
+      }
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    return await client.pendencia.create({
+      data: {
+        abertaEm: finishedAt,
+        descricao: outcome.pendingDescription,
+        empresaId: company.id,
+        origem: 'ACESSORIAS_EXECUCAO_EMPRESA',
+        prioridade: PrioridadePendencia.ALTA,
+        responsavelInternoId: company.responsavelInternoId,
+        status: StatusPendencia.ABERTA,
+        tipo: TipoPendencia.OPERACIONAL,
+        titulo: outcome.pendingTitle
+      },
+      select: {
+        id: true
+      }
+    });
+  }
+
+  private async upsertCompanyIntegrationState(
+    client: Prisma.TransactionClient,
+    companyId: string,
+    finishedAt: Date,
+    success: boolean,
+    message: string
+  ): Promise<CompanyIntegrationRecord> {
+    const existing = await client.integracaoEmpresa.findFirst({
+      select: companyIntegrationSelect,
+      orderBy: {
+        updatedAt: 'desc'
+      },
+      where: {
+        empresaId: companyId,
+        tipoIntegracao: TipoIntegracao.API
+      }
+    });
+
+    const data = {
+      empresaId: companyId,
+      mensagemErroAtual: success ? null : message,
+      observacoes: existing?.observacoes ?? null,
+      statusIntegracao: success
+        ? StatusIntegracao.ATIVA
+        : StatusIntegracao.ERRO,
+      tipoIntegracao: TipoIntegracao.API,
+      ultimoErroEm: success ? null : finishedAt,
+      ultimoSucessoEm: success ? finishedAt : existing?.ultimoSucessoEm ?? null
+    };
+
+    if (existing) {
+      return await client.integracaoEmpresa.update({
+        data,
+        select: companyIntegrationSelect,
+        where: {
+          id: existing.id
+        }
+      });
+    }
+
+    return await client.integracaoEmpresa.create({
+      data: {
+        ...data
+      },
+      select: companyIntegrationSelect
+    });
+  }
+
+  private mapIntegrationRecord(
+    record: CompanyIntegrationRecord
+  ): AcessoriasCompanyExecutionIntegrationView {
+    return {
+      createdAt: record.createdAt.toISOString(),
+      empresaId: record.empresaId,
+      id: record.id,
+      mensagemErroAtual: record.mensagemErroAtual,
+      observacoes: record.observacoes,
+      statusIntegracao: record.statusIntegracao,
+      tipoIntegracao: record.tipoIntegracao,
+      updatedAt: record.updatedAt.toISOString(),
+      ultimoErroEm: record.ultimoErroEm?.toISOString() ?? null,
+      ultimoSucessoEm: record.ultimoSucessoEm?.toISOString() ?? null
+    };
+  }
+
+  private mapExecutionVarredura(
+    record: {
+      createdAt: Date;
+      empresaId: string;
+      finalizadoEm: Date | null;
+      id: string;
+      iniciadoEm: Date;
+      resumoResultado: string | null;
+      statusExecucao: StatusExecucaoVarredura;
+      tipoVarredura: TipoVarredura;
+      updatedAt: Date;
+    }
+  ): AcessoriasCompanyExecutionVarreduraView {
+    return {
+      createdAt: record.createdAt.toISOString(),
+      empresaId: record.empresaId,
+      finalizadoEm: record.finalizadoEm?.toISOString() ?? null,
+      id: record.id,
+      iniciadoEm: record.iniciadoEm.toISOString(),
+      resumoResultado: record.resumoResultado,
+      statusExecucao: record.statusExecucao,
+      tipoVarredura: record.tipoVarredura,
+      updatedAt: record.updatedAt.toISOString()
     };
   }
 

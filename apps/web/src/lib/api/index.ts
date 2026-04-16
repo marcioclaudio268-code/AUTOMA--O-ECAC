@@ -44,7 +44,7 @@ export type StatusAcessoriasEmpresaVinculo =
   | 'AMBIGUA'
   | 'IGNORADA';
 
-export type TipoVarredura = 'MANUAL';
+export type TipoVarredura = 'MANUAL' | 'ACESSORIAS';
 
 export type StatusExecucaoVarredura = 'INICIADA' | 'CONCLUIDA' | 'FALHA';
 
@@ -418,6 +418,13 @@ export type AcessoriasConnectionTestResponse = {
   job: AcessoriasJobRecord;
   message: string;
   success: boolean;
+};
+
+export type AcessoriasCompanyExecutionResponse = {
+  integration: CompanyIntegration;
+  message: string;
+  success: boolean;
+  varredura: VarreduraRecord;
 };
 
 export type AcessoriasCompanyLinkInput = {
@@ -1053,6 +1060,17 @@ export async function unlinkAcessoriasCompany(
     `/integracoes/acessorias/empresas/${empresaId}/link`,
     {
       method: 'DELETE'
+    }
+  );
+}
+
+export async function executeAcessoriasCompanyLoop(
+  empresaId: string
+): Promise<AcessoriasCompanyExecutionResponse> {
+  return apiRequest<AcessoriasCompanyExecutionResponse>(
+    `/integracoes/acessorias/empresas/${empresaId}/execute`,
+    {
+      method: 'POST'
     }
   );
 }

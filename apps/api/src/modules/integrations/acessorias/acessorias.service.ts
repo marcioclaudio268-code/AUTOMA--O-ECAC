@@ -10,6 +10,7 @@ import { AcessoriasJobsService } from './services/acessorias-jobs.service';
 import type {
   AcessoriasCompanyLinkInput,
   AcessoriasCompanyLinkView,
+  AcessoriasCompanyExecutionResponse,
   AcessoriasCompanySyncResponse,
   AcessoriasConnectionTestResponse,
   AcessoriasConfigView,
@@ -62,6 +63,16 @@ export class AcessoriasService {
 
   unlinkCompany(empresaId: string): Promise<AcessoriasCompanyLinkView> {
     return this.empresasService.unlinkCompany(empresaId);
+  }
+
+  executeCompany(
+    empresaId: string,
+    executadoPorUsuarioInternoId?: string | null
+  ): Promise<AcessoriasCompanyExecutionResponse> {
+    return this.empresasService.executeCompany(
+      empresaId,
+      executadoPorUsuarioInternoId
+    );
   }
 
   async testConnection(): Promise<AcessoriasConnectionTestResponse> {
