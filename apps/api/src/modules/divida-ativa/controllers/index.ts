@@ -1,1 +1,1 @@
-﻿export {};
+export * from './divida-ativa.controller';

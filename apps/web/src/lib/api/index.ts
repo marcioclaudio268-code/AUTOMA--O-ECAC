@@ -45,7 +45,7 @@ export type StatusAcessoriasEmpresaVinculo =
   | 'AMBIGUA'
   | 'IGNORADA';
 
-export type TipoVarredura = 'MANUAL' | 'ACESSORIAS';
+export type TipoVarredura = 'MANUAL' | 'ACESSORIAS' | 'DIVIDA_ATIVA';
 
 export type StatusExecucaoVarredura = 'INICIADA' | 'CONCLUIDA' | 'FALHA';
 
@@ -426,6 +426,21 @@ export type AcessoriasCompanyExecutionResponse = {
   integration: CompanyIntegration;
   message: string;
   success: boolean;
+  varredura: VarreduraRecord;
+};
+
+export type DividaAtivaExecutionResponse = {
+  integration: CompanyIntegration;
+  message: string;
+  success: boolean;
+  summary: {
+    activeCount: number;
+    actionableCount: number;
+    createdCount: number;
+    deactivatedCount: number;
+    semOcorrencia: boolean;
+    updatedCount: number;
+  };
   varredura: VarreduraRecord;
 };
 
@@ -1071,6 +1086,17 @@ export async function executeAcessoriasCompanyLoop(
 ): Promise<AcessoriasCompanyExecutionResponse> {
   return apiRequest<AcessoriasCompanyExecutionResponse>(
     `/integracoes/acessorias/empresas/${empresaId}/execute`,
+    {
+      method: 'POST'
+    }
+  );
+}
+
+export async function executeDividaAtivaCompanyLoop(
+  empresaId: string
+): Promise<DividaAtivaExecutionResponse> {
+  return apiRequest<DividaAtivaExecutionResponse>(
+    `/integracoes/divida-ativa/empresas/${empresaId}/execute`,
     {
       method: 'POST'
     }

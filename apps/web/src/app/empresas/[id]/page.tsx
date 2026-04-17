@@ -9,6 +9,7 @@ import { requireSession, signOut } from '@/lib/auth';
 import {
   executeManualScan,
   executeAcessoriasCompanyLoop,
+  executeDividaAtivaCompanyLoop,
   createCompanyPendencia,
   getCompany,
   getCompanyOperationalHistory,
@@ -79,6 +80,7 @@ type CompanyFormState = {
 type OperationalQuickAction =
   | 'executarVarreduraManual'
   | 'executarAcessoriasIntegracao'
+  | 'executarDividaAtivaIntegracao'
   | 'registrarConferencia'
   | 'registrarRevisaoOperacional'
   | 'marcarAcessoDisponivel'
@@ -254,6 +256,8 @@ function formatScanTypeLabel(value: VarreduraRecord['tipoVarredura']) {
   switch (value) {
     case 'ACESSORIAS':
       return 'Acessorias';
+    case 'DIVIDA_ATIVA':
+      return 'Divida ativa';
     case 'MANUAL':
     default:
       return 'Manual';
@@ -808,6 +812,50 @@ export default function CompanyDetailPage() {
     }
   }
 
+  async function handleDividaAtivaExecution() {
+    if (!companyId) {
+      setError('Empresa invalida.');
+      return;
+    }
+
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
+    setIsSaving(true);
+    setActiveQuickAction('executarDividaAtivaIntegracao');
+    setError('');
+    setMessage('');
+    setFlashMessage('');
+
+    try {
+      const result = await executeDividaAtivaCompanyLoop(companyId);
+
+      try {
+        await refreshOperationalData();
+      } catch {
+        // Refresh best effort; the execution already persisted its own trace.
+      }
+
+      if (result.success) {
+        setMessage(result.message);
+      } else {
+        setError(result.message);
+      }
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Falha ao executar integracao de divida ativa.'
+      );
+    } finally {
+      submitLockRef.current = false;
+      setIsSaving(false);
+      setActiveQuickAction(null);
+    }
+  }
+
   async function handleQuickAction(action: OperationalQuickAction) {
     if (!companyId) {
       setError('Empresa invalida.');
@@ -824,6 +872,9 @@ export default function CompanyDetailPage() {
     switch (action) {
       case 'executarAcessoriasIntegracao':
         await handleAcessoriasExecution();
+        break;
+      case 'executarDividaAtivaIntegracao':
+        await handleDividaAtivaExecution();
         break;
       case 'registrarConferencia':
         await runOperationalAction(
@@ -1894,11 +1945,11 @@ export default function CompanyDetailPage() {
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="space-y-1">
                     <h3 className="text-sm font-semibold text-slate-900">
-                      Execucao Acessorias da empresa
+                      Execucoes operacionais da empresa
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Dispara o primeiro loop operacional desta empresa contra a
-                      integracao Acessorias, com trilha rastreavel.
+                      Dispara os loops operacionais da empresa com trilha
+                      rastreavel.
                     </p>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-3">
@@ -1912,6 +1963,17 @@ export default function CompanyDetailPage() {
                       {activeQuickAction === 'executarAcessoriasIntegracao'
                         ? 'Executando Acessorias...'
                         : 'Executar Acessorias nesta empresa'}
+                    </button>
+                    <button
+                      className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      aria-busy={isSaving}
+                      disabled={isSaving}
+                      onClick={() => void handleQuickAction('executarDividaAtivaIntegracao')}
+                      type="button"
+                    >
+                      {activeQuickAction === 'executarDividaAtivaIntegracao'
+                        ? 'Executando divida ativa...'
+                        : 'Executar divida ativa nesta empresa'}
                     </button>
                   </div>
                 </div>

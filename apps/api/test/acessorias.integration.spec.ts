@@ -54,8 +54,10 @@ let validationServer: ReturnType<typeof createServer> | undefined;
 let expectedToken = VALID_TOKEN;
 let lastAuthorizationHeader = '';
 let externalCompaniesPayload: Array<Record<string, unknown>> = [];
+let externalDividaAtivaPayload: unknown[] | Record<string, unknown> = [];
 let externalParcelamentosPayload: unknown[] | Record<string, unknown> = [];
 let probeStatusCode = 200;
+let dividaAtivaStatusCode = 200;
 let parcelamentosStatusCode = 200;
 
 beforeAll(async () => {
@@ -159,6 +161,34 @@ beforeAll(async () => {
       return;
     }
 
+    if (pathname === '/divida-ativa') {
+      if (lastAuthorizationHeader !== `Bearer ${expectedToken}`) {
+        response.writeHead(401, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            error: 'Unauthorized',
+            message: 'Token invalido.'
+          })
+        );
+        return;
+      }
+
+      response.writeHead(dividaAtivaStatusCode, {
+        'content-type': 'application/json'
+      });
+      response.end(
+        JSON.stringify(
+          dividaAtivaStatusCode >= 200 && dividaAtivaStatusCode < 300
+            ? externalDividaAtivaPayload
+            : {
+                error: 'DividaAtivaError',
+                message: `Divida ativa mock respondeu ${dividaAtivaStatusCode}.`
+              }
+        )
+      );
+      return;
+    }
+
     response.writeHead(404, { 'content-type': 'application/json' });
     response.end(
       JSON.stringify({
@@ -176,15 +206,17 @@ beforeAll(async () => {
   process.env.ACESSORIAS_TOKEN_ENCRYPTION_KEY = 'acessorias-encryption-secret';
   process.env.ACESSORIAS_TEST_CONNECTION_URL = `${validationServerUrl}/probe`;
   process.env.ACESSORIAS_EMPRESAS_URL = `${validationServerUrl}/companies`;
+  process.env.ACESSORIAS_DIVIDA_ATIVA_URL = `${validationServerUrl}/divida-ativa`;
   process.env.ACESSORIAS_PARCELAMENTOS_URL = `${validationServerUrl}/parcelamentos`;
 
   runPrismaMigrateDeploy();
   runBackendBuild();
 
-  const [authModule, acessoriasModule] = (await Promise.all([
+  const [authModule, acessoriasModule, dividaAtivaModule] = (await Promise.all([
     importModuleFromDist('modules/auth/auth.module.js'),
-    importModuleFromDist('modules/integrations/acessorias/acessorias.module.js')
-  ])) as [AnyModuleNamespace, AnyModuleNamespace];
+    importModuleFromDist('modules/integrations/acessorias/acessorias.module.js'),
+    importModuleFromDist('modules/divida-ativa/divida-ativa.module.js')
+  ])) as [AnyModuleNamespace, AnyModuleNamespace, AnyModuleNamespace];
 
   const IntegrationTestModule = class IntegrationTestModule {};
   Module({
@@ -194,6 +226,7 @@ beforeAll(async () => {
         isGlobal: true
       }),
       authModule.AuthModule,
+      dividaAtivaModule.DividaAtivaModule,
       acessoriasModule.AcessoriasModule
     ]
   })(IntegrationTestModule);
@@ -239,8 +272,10 @@ afterAll(async () => {
 beforeEach(() => {
   expectedToken = VALID_TOKEN;
   externalCompaniesPayload = [];
+  externalDividaAtivaPayload = [];
   externalParcelamentosPayload = [];
   lastAuthorizationHeader = '';
+  dividaAtivaStatusCode = 200;
   parcelamentosStatusCode = 200;
   probeStatusCode = 200;
 });
@@ -864,6 +899,139 @@ describe('Acessorias integration', () => {
       ativo: true,
       referenciaExterna: 'parcelamento-confiavel-1',
       situacao: 'EM_DIA'
+    });
+  }, TEST_TIMEOUT);
+
+  test('integra divida ativa, gera evento e pendencia quando acionavel e trata lista vazia como sem ocorrencia', async () => {
+    const empresaDividaAtiva = await prisma.empresa.create({
+      data: {
+        cnpj: '93939393000110',
+        naCarteira: true,
+        nomeFantasia: 'Empresa Divida Ativa ECAC',
+        pendenciaOperacional: false,
+        razaoSocial: 'Empresa Divida Ativa ECAC Ltda',
+        regimeTributario: RegimeTributario.SIMPLES_NACIONAL,
+        responsavelInternoId: null,
+        statusAcesso: StatusAcessoEmpresa.NAO_VERIFICADO,
+        statusProcuracao: StatusProcuracaoEmpresa.NAO_VERIFICADA
+      }
+    });
+
+    externalCompaniesPayload = [
+      {
+        cnpj: '93939393000110',
+        id: 'ext-divida-1',
+        razaoSocial: 'Empresa Externa Divida Ativa Ltda'
+      }
+    ];
+    externalDividaAtivaPayload = [
+      {
+        dataInscricao: '2025-06-01T00:00:00.000Z',
+        id: 'divida-ativa-1',
+        numeroInscricao: '12345',
+        requerAcao: true,
+        situacao: 'INSCRITA',
+        tipo: 'Tributo Federal'
+      }
+    ];
+
+    await requestJson('/integracoes/acessorias/config', {
+      body: { apiToken: VALID_TOKEN },
+      cookie: sessionCookie,
+      method: 'PATCH'
+    });
+
+    await requestJson('/integracoes/acessorias/empresas/sync', {
+      cookie: sessionCookie,
+      method: 'POST'
+    });
+
+    const firstExecution = await requestJson(
+      `/integracoes/divida-ativa/empresas/${empresaDividaAtiva.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(firstExecution.response.status).toBe(200);
+    expect(firstExecution.body).toMatchObject({
+      success: true,
+      summary: {
+        activeCount: 1,
+        actionableCount: 1,
+        semOcorrencia: false
+      },
+      varredura: {
+        tipoVarredura: 'DIVIDA_ATIVA',
+        statusExecucao: 'CONCLUIDA'
+      }
+    });
+
+    const firstEvent = await prisma.eventoOperacional.findFirstOrThrow({
+      orderBy: { createdAt: 'desc' },
+      where: {
+        empresaId: empresaDividaAtiva.id
+      }
+    });
+    const firstPendencia = await prisma.pendencia.findFirstOrThrow({
+      where: {
+        empresaId: empresaDividaAtiva.id,
+        origem: 'DIVIDA_ATIVA_EXECUCAO_EMPRESA'
+      }
+    });
+    const firstIntegration = await prisma.integracaoEmpresa.findFirstOrThrow({
+      orderBy: { updatedAt: 'desc' },
+      where: {
+        empresaId: empresaDividaAtiva.id,
+        tipoIntegracao: 'API'
+      }
+    });
+
+    expect(firstEvent.descricao).toContain('divida ativa');
+    expect(firstEvent.metadata).toMatchObject({
+      integrationType: 'DIVIDA_ATIVA',
+      companyId: empresaDividaAtiva.id
+    });
+    expect(firstPendencia.status).toBe('ABERTA');
+    expect(firstPendencia.tipo).toBe('OPERACIONAL');
+    expect(firstIntegration.statusIntegracao).toBe('ATIVA');
+
+    externalDividaAtivaPayload = [];
+
+    const secondExecution = await requestJson(
+      `/integracoes/divida-ativa/empresas/${empresaDividaAtiva.id}/execute`,
+      {
+        cookie: sessionCookie,
+        method: 'POST'
+      }
+    );
+
+    expect(secondExecution.response.status).toBe(200);
+    expect(secondExecution.body).toMatchObject({
+      success: true,
+      summary: {
+        activeCount: 0,
+        actionableCount: 0,
+        semOcorrencia: true
+      },
+      varredura: {
+        tipoVarredura: 'DIVIDA_ATIVA',
+        statusExecucao: 'CONCLUIDA'
+      }
+    });
+
+    const dividasAtivas = await prisma.dividaAtiva.findMany({
+      where: {
+        empresaId: empresaDividaAtiva.id
+      }
+    });
+
+    expect(dividasAtivas).toHaveLength(1);
+    expect(dividasAtivas[0]).toMatchObject({
+      ativo: false,
+      referenciaExterna: 'divida-ativa-1',
+      situacao: 'INSCRITA'
     });
   }, TEST_TIMEOUT);
 

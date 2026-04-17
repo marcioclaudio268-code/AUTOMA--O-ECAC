@@ -106,6 +106,27 @@ export type AcessoriasParcelamentosFetchResult = {
   items: AcessoriasParcelamentoExternalRaw[];
 };
 
+export type AcessoriasDividaAtivaExternalRaw = {
+  acaoNecessaria?: boolean | number | string | null;
+  codigo?: string | null;
+  dataInscricao?: string | null;
+  descricao?: string | null;
+  id?: string | null;
+  inscricao?: string | null;
+  necessidadeConferencia?: boolean | number | string | null;
+  numeroInscricao?: string | null;
+  pendente?: boolean | number | string | null;
+  referencia?: string | null;
+  requerAcao?: boolean | number | string | null;
+  situacao?: string | null;
+  status?: string | null;
+  tipo?: string | null;
+};
+
+export type AcessoriasDividaAtivaFetchResult = {
+  items: AcessoriasDividaAtivaExternalRaw[];
+};
+
 export type AcessoriasCompanySyncSummaryView = {
   atualizados: number;
   criados: number;

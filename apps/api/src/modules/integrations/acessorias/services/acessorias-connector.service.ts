@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import type {
   AcessoriasCompaniesFetchPage,
   AcessoriasConnectionProbeResult,
+  AcessoriasDividaAtivaFetchResult,
   AcessoriasParcelamentosFetchResult
 } from '../acessorias.types';
 
@@ -192,6 +193,76 @@ export class AcessoriasConnectorService {
     }
   }
 
+  async fetchDividaAtiva(
+    token: string,
+    input: {
+      acessoriasEmpresaId: string;
+      cnpj: string;
+    }
+  ): Promise<AcessoriasDividaAtivaFetchResult> {
+    const dividaAtivaUrl = this.configService
+      .get<string>('ACESSORIAS_DIVIDA_ATIVA_URL')
+      ?.trim();
+
+    if (!dividaAtivaUrl) {
+      throw new Error(
+        'ACESSORIAS_DIVIDA_ATIVA_URL nao configurada neste ambiente.'
+      );
+    }
+
+    let parsedUrl: URL;
+
+    try {
+      parsedUrl = new URL(dividaAtivaUrl);
+    } catch {
+      throw new Error('ACESSORIAS_DIVIDA_ATIVA_URL invalida.');
+    }
+
+    parsedUrl.searchParams.set('acessoriasEmpresaId', input.acessoriasEmpresaId);
+    parsedUrl.searchParams.set('empresaId', input.acessoriasEmpresaId);
+    parsedUrl.searchParams.set('cnpj', input.cnpj);
+
+    const controller = new AbortController();
+    const timeoutMs = this.normalizeTimeout(
+      this.configService.get<string>('ACESSORIAS_DIVIDA_ATIVA_TIMEOUT_MS')
+    );
+    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(parsedUrl, {
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        method: 'GET',
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `Acessorias respondeu ${response.status} ao buscar divida ativa.`
+        );
+      }
+
+      const payload = this.parseJsonResponse(await response.text());
+      return this.normalizeDividaAtivaPayload(payload);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Busca de divida ativa Acessorias expirou.');
+      }
+
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error(
+        'Falha ao contatar o endpoint de divida ativa Acessorias.'
+      );
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  }
+
   private async tryCompaniesFallbackProbe(
     token: string,
     companiesUrl: string | undefined,
@@ -375,6 +446,40 @@ export class AcessoriasConnectorService {
 
     throw new Error(
       'Resposta de parcelamentos Acessorias sem lista reconhecivel.'
+    );
+  }
+
+  private normalizeDividaAtivaPayload(
+    payload: unknown
+  ): AcessoriasDividaAtivaFetchResult {
+    if (Array.isArray(payload)) {
+      return {
+        items: payload.filter(isRecord) as AcessoriasDividaAtivaFetchResult['items']
+      };
+    }
+
+    if (payload && typeof payload === 'object') {
+      const record = payload as Record<string, unknown>;
+      const itemsSource =
+        record.items ?? record.dividasAtivas ?? record.dividas ?? record.data ?? record.results;
+
+      if (Array.isArray(itemsSource)) {
+        return {
+          items: itemsSource.filter(isRecord) as AcessoriasDividaAtivaFetchResult['items']
+        };
+      }
+
+      const total = readInteger(record.totalDividas ?? record.total ?? record.count);
+
+      if (total === 0) {
+        return {
+          items: []
+        };
+      }
+    }
+
+    throw new Error(
+      'Resposta de divida ativa Acessorias sem lista reconhecivel.'
     );
   }
 

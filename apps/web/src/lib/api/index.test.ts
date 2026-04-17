@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 
 import {
   executeAcessoriasCompanyLoop,
+  executeDividaAtivaCompanyLoop,
   registerCompanyCheck,
   registerCompanyOperationalReview
 } from './index';
@@ -115,6 +116,65 @@ test('executeAcessoriasCompanyLoop chama o endpoint certo da execucao controlada
   });
   expect(fetchMock).toHaveBeenCalledWith(
     expect.stringContaining('/integracoes/acessorias/empresas/empresa-123/execute'),
+    expect.objectContaining({
+      method: 'POST'
+    })
+  );
+});
+
+test('executeDividaAtivaCompanyLoop chama o endpoint certo da execucao controlada', async () => {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    text: async () =>
+      JSON.stringify({
+        integration: {
+          createdAt: '2026-04-14T12:00:00.000Z',
+          empresaId: 'empresa-123',
+          id: 'integracao-2',
+          mensagemErroAtual: null,
+          observacoes: null,
+          statusIntegracao: 'ATIVA',
+          tipoIntegracao: 'API',
+          ultimaExecucaoEm: '2026-04-14T12:00:00.000Z',
+          updatedAt: '2026-04-14T12:00:00.000Z',
+          ultimoErroEm: null,
+          ultimoSucessoEm: '2026-04-14T12:00:00.000Z'
+        },
+        message: 'Leitura de divida ativa concluida.',
+        success: true,
+        summary: {
+          activeCount: 0,
+          actionableCount: 0,
+          createdCount: 0,
+          deactivatedCount: 0,
+          semOcorrencia: true,
+          updatedCount: 0
+        },
+        varredura: {
+          createdAt: '2026-04-14T12:00:00.000Z',
+          empresaId: 'empresa-123',
+          finalizadoEm: '2026-04-14T12:00:00.000Z',
+          id: 'varredura-2',
+          iniciadoEm: '2026-04-14T12:00:00.000Z',
+          resumoResultado: 'Leitura de divida ativa concluida.',
+          statusExecucao: 'CONCLUIDA',
+          tipoVarredura: 'DIVIDA_ATIVA',
+          updatedAt: '2026-04-14T12:00:00.000Z'
+        }
+      })
+  } as Response);
+
+  vi.stubGlobal('fetch', fetchMock);
+
+  const result = await executeDividaAtivaCompanyLoop('empresa-123');
+
+  expect(result).toMatchObject({
+    message: 'Leitura de divida ativa concluida.',
+    success: true
+  });
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining('/integracoes/divida-ativa/empresas/empresa-123/execute'),
     expect.objectContaining({
       method: 'POST'
     })
