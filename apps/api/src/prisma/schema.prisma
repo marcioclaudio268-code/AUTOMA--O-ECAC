@@ -74,6 +74,7 @@ enum TipoAcessoriasSyncCursor {
 enum TipoVarredura {
   MANUAL
   ACESSORIAS
+  DIVIDA_ATIVA
 }
 
 enum StatusExecucaoVarredura {
@@ -204,6 +205,7 @@ model Empresa {
   varreduras              Varredura[]
   eventosOperacionais     EventoOperacional[]
   parcelamentos           Parcelamento[]
+  dividasAtivas           DividaAtiva[]
   acessoriasVinculo       AcessoriasEmpresaVinculo?
 
   @@index([responsavelInternoId])
@@ -347,6 +349,27 @@ model Parcelamento {
   parcelaAtual           Int?
   dataVencimentoRelevante DateTime?
   indicioAtraso          Boolean   @default(false)
+  requerAcao             Boolean   @default(false)
+  ativo                  Boolean   @default(true)
+  ultimaAtualizacaoEm    DateTime
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@unique([empresaId, referenciaExterna])
+  @@index([empresaId])
+  @@index([empresaId, ativo])
+  @@index([requerAcao])
+}
+
+model DividaAtiva {
+  id                     String    @id @default(cuid())
+  empresaId              String
+  empresa                Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  referenciaExterna      String    @db.Text
+  numeroInscricao        String    @db.Text
+  tipoDivida             String    @db.Text
+  situacao               String    @db.Text
+  dataInscricao          DateTime?
   requerAcao             Boolean   @default(false)
   ativo                  Boolean   @default(true)
   ultimaAtualizacaoEm    DateTime

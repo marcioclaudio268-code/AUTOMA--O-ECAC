@@ -94,6 +94,7 @@ function buildOperationalHistory(): CompanyOperationalHistory {
 const mockState = vi.hoisted(() => ({
   createCompanyPendenciaMock: vi.fn(),
   executeAcessoriasCompanyLoopMock: vi.fn(),
+  executeDividaAtivaCompanyLoopMock: vi.fn(),
   executeManualScanMock: vi.fn(),
   getCompanyMock: vi.fn(),
   getHistoryMock: vi.fn(),
@@ -132,6 +133,7 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('@/lib/api', () => ({
   createCompanyPendencia: mockState.createCompanyPendenciaMock,
   executeAcessoriasCompanyLoop: mockState.executeAcessoriasCompanyLoopMock,
+  executeDividaAtivaCompanyLoop: mockState.executeDividaAtivaCompanyLoopMock,
   executeManualScan: mockState.executeManualScanMock,
   getCompany: mockState.getCompanyMock,
   getCompanyOperationalHistory: mockState.getHistoryMock,
@@ -159,6 +161,7 @@ beforeEach(() => {
 
   mockState.createCompanyPendenciaMock.mockReset();
   mockState.executeAcessoriasCompanyLoopMock.mockReset();
+  mockState.executeDividaAtivaCompanyLoopMock.mockReset();
   mockState.executeManualScanMock.mockReset();
   mockState.getCompanyMock.mockReset();
   mockState.getHistoryMock.mockReset();
@@ -212,6 +215,42 @@ beforeEach(() => {
       updatedAt: '2026-04-16T12:10:00.000Z'
     }
   });
+  mockState.executeDividaAtivaCompanyLoopMock.mockResolvedValue({
+    integration: {
+      createdAt: '2026-04-16T12:11:00.000Z',
+      empresaId: 'company-1',
+      id: 'integration-2',
+      mensagemErroAtual: null,
+      observacoes: null,
+      statusIntegracao: 'ATIVA',
+      tipoIntegracao: 'API',
+      ultimaExecucaoEm: '2026-04-16T12:11:00.000Z',
+      updatedAt: '2026-04-16T12:11:00.000Z',
+      ultimoErroEm: null,
+      ultimoSucessoEm: '2026-04-16T12:11:00.000Z'
+    },
+    message: 'Leitura de divida ativa concluida para Empresa Alfa Ltda.',
+    success: true,
+    summary: {
+      activeCount: 0,
+      actionableCount: 0,
+      createdCount: 0,
+      deactivatedCount: 0,
+      semOcorrencia: true,
+      updatedCount: 0
+    },
+    varredura: {
+      createdAt: '2026-04-16T12:11:00.000Z',
+      empresaId: 'company-1',
+      finalizadoEm: '2026-04-16T12:11:00.000Z',
+      id: 'scan-2',
+      iniciadoEm: '2026-04-16T12:10:30.000Z',
+      resumoResultado: 'Leitura de divida ativa concluida.',
+      statusExecucao: 'CONCLUIDA',
+      tipoVarredura: 'DIVIDA_ATIVA',
+      updatedAt: '2026-04-16T12:11:00.000Z'
+    }
+  });
 
   mockState.updateCompanyMock.mockResolvedValue({
     updatedAt: '2026-04-16T12:10:00.000Z'
@@ -244,6 +283,7 @@ test('renderiza a pagina e dispara o loop Acessorias da empresa', async () => {
   });
 
   await waitForText('Executar Acessorias nesta empresa');
+  await waitForText('Executar divida ativa nesta empresa');
   await waitForText('Necessita conferencia');
   await waitForText('Ultima execucao');
   await waitForText('Ultimo sucesso');
@@ -260,6 +300,20 @@ test('renderiza a pagina e dispara o loop Acessorias da empresa', async () => {
 
   expect(mockState.executeAcessoriasCompanyLoopMock).toHaveBeenCalledTimes(1);
   expect(mockState.executeAcessoriasCompanyLoopMock).toHaveBeenCalledWith(
+    'company-1'
+  );
+
+  const dividaAtivaButton = findButtonByText('Executar divida ativa nesta empresa');
+
+  await act(async () => {
+    Simulate.click(dividaAtivaButton);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  await waitForText('Leitura de divida ativa concluida para Empresa Alfa Ltda.');
+
+  expect(mockState.executeDividaAtivaCompanyLoopMock).toHaveBeenCalledTimes(1);
+  expect(mockState.executeDividaAtivaCompanyLoopMock).toHaveBeenCalledWith(
     'company-1'
   );
 }, 20_000);
